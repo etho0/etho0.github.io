@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Escape Surface — container → native reach</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:720px;margin:0 auto 12px}
+h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
+h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin:13px 0 5px}
+.sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
+button{width:100%;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin-top:8px}
+button.alt{background:#30363d}
+.t{border:1px solid #21262d;border-left-width:3px;border-radius:6px;padding:7px 10px;margin:5px 0;font-size:12px}
+.none{border-left-color:#30363d}.some{border-left-color:#d29922}.crit{border-left-color:#f85149;background:#2d1214}
+.v-none{color:#7ee787}.v-some{color:#e3b341}.v-crit{color:#ff7b72;font-weight:700}
+.n{font-weight:650;margin-bottom:2px}.r{font-family:ui-monospace,monospace;font-size:11.5px;word-break:break-all}
+.verdict{border-radius:8px;padding:12px;margin:10px 0;font-weight:650;text-align:center;font-size:13px;line-height:1.5}
+.q-none{background:#0f5323;color:#7ee787}.q-some{background:#3d2c00;color:#e3b341}.q-crit{background:#2d1214;color:#ff7b72}.q-wait{background:#21262d;color:#8b949e}
+input{width:100%;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,monospace;margin-bottom:8px}
+code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:220px;overflow:auto;color:#8b949e;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Escape Surface</h2>
+  <p class="sub"><b>Reconnaissance only.</b> Enumerates what native capability the surrounding
+  container exposes to web content. It <i>describes</i> reachable surface — it does not execute
+  commands, write files, or launch anything. Use the findings to decide what a minimal,
+  well-scoped proof would look like for a report.
+  <br><br>context: <code id="ctx"></code></p>
+  <input id="srv" placeholder="server .../log (optional)">
+  <div class="verdict q-wait" id="verdict">idle</div>
+  <button onclick="enumerate()">Enumerate native surface</button>
+  <button class="alt" onclick="dumpBridge()">Deep-dump bridge objects</button>
+  <div id="out"></div>
+  <pre id="dump">bridge dump appears here…</pre>
+</div>
+<script>
+const Q=new URLSearchParams(location.search);
+const safeLS=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+let SRV=Q.get('srv')||safeLS('oracle_srv')||'';
+document.getElementById('srv').value=SRV;
+document.getElementById('srv').onchange=e=>{SRV=e.target.value.replace(/\/$/,'');try{localStorage.setItem('oracle_srv',SRV)}catch(_){}};
+document.getElementById('ctx').textContent = location.origin + '  ·  ' + navigator.userAgent.slice(0,60);
+
+const R={origin:location.origin,ua:navigator.userAgent,findings:[],severity:'none'};
+function item(name, level, detail){
+  const d=document.createElement('div'); d.className='t '+level;
+  d.innerHTML=`<div class="n">${name}</div><div class="r v-${level}">${detail}</div>`;
+  document.getElementById('out').appendChild(d);
+  R.findings.push({name,level,detail});
+}
+function sec(t){const h=document.createElement('h3');h.textContent=t;document.getElementById('out').appendChild(h);}
+async function post(type,data){ if(!SRV)return;
+  try{ await fetch(SRV+'?type='+type,{method:'POST',
+    headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
+    body:JSON.stringify({...data,_ts:Date.now(),ua:navigator.userAgent,href:location.href})});}catch(e){} }
+
+function props(o){ const s=new Set();
+  try{ Object.getOwnPropertyNames(o).forEach(k=>s.add(k)); }catch(e){}
+  try{ let p=Object.getPrototypeOf(o); while(p && p!==Object.prototype){
+    Object.getOwnPropertyNames(p).forEach(k=>s.add(k)); p=Object.getPrototypeOf(p);} }catch(e){}
+  return [...s];
+}
+
+function enumerate(){
+  document.getElementById('out').innerHTML=''; R.findings=[];
+
+  // ---------- Node / Electron: the direct path to local execution
+  sec('Node / Electron reach');
+  const nodeBits = {
+    'require'  : typeof window.require,
+    'module'   : typeof window.module,
+    'process'  : typeof window.process,
+    'global'   : typeof window.global,
+    'Buffer'   : typeof window.Buffer,
+    '__dirname': typeof window.__dirname,
+  };
+  const nodePresent = Object.entries(nodeBits).filter(([k,v])=>v!=='undefined');
+  if(nodePresent.length){
+    let ver=''; try{ ver=JSON.stringify(window.process&&window.process.versions||{}).slice(0,160);}catch(e){}
+    // require() reachable from page context is full local code execution
+    let reqWorks=false; try{ reqWorks = typeof window.require === 'function' &&
+      !!window.require('path'); }catch(e){}
+    item('Node globals exposed', reqWorks?'crit':'some',
+      nodePresent.map(([k,v])=>`${k}=${v}`).join(', ') + (ver?`<br>versions: ${ver}`:'') +
+      (reqWorks ? '<br><b>require() RESOLVES — page JS has Node reach. This is local code execution.</b>'
+                : '<br>require present but did not resolve a core module'));
+  } else item('Node globals','none','absent — no nodeIntegration in this context');
+
+  // contextIsolation escape hatches sometimes leak the preload bridge
+  sec('Preload / host-exposed API objects');
+  const suspects = Object.keys(window).filter(k =>
+    /^(electron|api|bridge|native|host|desktop|ipc|__|_[A-Z])/i.test(k));
+  item('window keys matching bridge patterns', suspects.length?'some':'none',
+    suspects.length? suspects.slice(0,25).join(', ') : 'none');
+
+  const known = {
+    'window.electronAPI'      : ()=>window.electronAPI,
+    'window.ipcRenderer'      : ()=>window.ipcRenderer,
+    'window.electron'         : ()=>window.electron,
+    'chrome.webview'          : ()=>window.chrome && window.chrome.webview,
+    'chrome.webview.hostObjects': ()=>window.chrome && window.chrome.webview && window.chrome.webview.hostObjects,
+    'webkit.messageHandlers'  : ()=>window.webkit && window.webkit.messageHandlers,
+    'TelegramWebviewProxy'    : ()=>window.TelegramWebviewProxy,
+    'Telegram.WebApp'         : ()=>window.Telegram && window.Telegram.WebApp,
+    'vkBridge'                : ()=>window.vkBridge,
+    'ReactNativeWebView'      : ()=>window.ReactNativeWebView,
+    'window.external'         : ()=>window.external,
+  };
+  for(const [name,get] of Object.entries(known)){
+    let o=null; try{o=get();}catch(e){}
+    if(o){
+      const p = props(o).filter(k=>!['constructor'].includes(k));
+      // host objects / ipc give the widest native reach
+      const dangerous = /hostObjects|ipcRenderer|external|electron/i.test(name);
+      item(name, dangerous?'crit':'some', `${p.length} member(s): ${p.slice(0,18).join(', ')}`);
+    }
+  }
+  if(!Object.values(known).some(g=>{try{return !!g()}catch(e){return false}}))
+    item('known bridge objects','none','none present');
+
+  // ---------- Android JavascriptInterface objects
+  sec('Android @JavascriptInterface objects');
+  const andr = Object.keys(window).filter(k=>{
+    try{ const v=window[k];
+      return v && typeof v==='object' && !(v instanceof Node) &&
+             /^(Android|JSBridge|NativeBridge|jsi_|App|Native)/i.test(k); }catch(e){return false}
+  });
+  item('candidate injected objects', andr.length?'some':'none',
+    andr.length? andr.map(k=>{ let m=[]; try{m=props(window[k]).slice(0,10);}catch(e){}
+      return `${k} {${m.join(',')}}`; }).join(' · ') : 'none');
+
+  // ---------- Scheme reach: what non-http schemes will this context accept?
+  //            (we only ASK the browser to resolve them — nothing is navigated)
+  sec('URI scheme surface (resolution only, no navigation)');
+  const schemes = ['file:///etc/passwd','tg://resolve?domain=x','vk://vk.com','zoommtg://zoom.us/join',
+                   'smb://127.0.0.1/share','ms-msdt:/id','shell:Downloads','itms-apps://'];
+  const resolvable = schemes.filter(u=>{ try{ new URL(u); return true; }catch(e){ return false; } });
+  item('parseable schemes', 'none', resolvable.join('  '));
+  item('note','none','Scheme <i>parseability</i> says nothing about whether the container will '+
+    'navigate or hand them to the OS. Test navigation manually and observe — that is where the '+
+    '2018 vk:// parameter-injection class lived.');
+
+  // ---------- download/open surface
+  sec('File delivery surface');
+  const a=document.createElement('a');
+  item('anchor download attribute', ('download' in a)?'some':'none', ('download' in a)?'supported':'absent');
+  item('showSaveFilePicker', (typeof window.showSaveFilePicker==='function')?'some':'none',
+       (typeof window.showSaveFilePicker==='function')?'present — can write a file the user then opens':'absent');
+  item('showDirectoryPicker', (typeof window.showDirectoryPicker==='function')?'crit':'none',
+       (typeof window.showDirectoryPicker==='function')?'present — directory-wide read/write reach':'absent');
+
+  const crit=R.findings.filter(f=>f.level==='crit').length;
+  const some=R.findings.filter(f=>f.level==='some').length;
+  R.severity = crit?'crit':some?'some':'none';
+  const v=document.getElementById('verdict');
+  if(crit){ v.className='verdict q-crit';
+    v.innerHTML=`${crit} HIGH-REACH SURFACE(S) — direct native capability reachable from page JS.`; }
+  else if(some){ v.className='verdict q-some';
+    v.innerHTML=`${some} bridge surface(s) present. No direct code-execution primitive found; audit each bridge method for what it wraps.`; }
+  else { v.className='verdict q-none';
+    v.textContent='No native reach exposed to page JS in this context.'; }
+  post('ESCAPE_SURFACE', R);
+}
+
+function dumpBridge(){
+  const out={};
+  for(const k of ['TelegramWebviewProxy','Telegram','vkBridge','ReactNativeWebView','electronAPI',
+                  'ipcRenderer','external','chrome']){
+    try{ const o=window[k]; if(!o) continue;
+      out[k]=props(o).slice(0,60);
+      if(k==='Telegram' && o.WebApp) out['Telegram.WebApp']=props(o.WebApp).slice(0,80);
+      if(k==='chrome' && o.webview) out['chrome.webview']=props(o.webview).slice(0,60);
+    }catch(e){ out[k]='ERR '+e.name; }
+  }
+  document.getElementById('dump').textContent = JSON.stringify(out,null,1);
+  post('ESCAPE_BRIDGE_DUMP', out);
+}
+</script>
+</body>
+</html>
