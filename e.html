@@ -103,7 +103,7 @@ function enumerate(){
     'window.electronAPI'      : ()=>window.electronAPI,
     'window.ipcRenderer'      : ()=>window.ipcRenderer,
     'window.electron'         : ()=>window.electron,
-    'chrome.webview'          : ()=>window.chrome && window.chrome.webview,
+    'chrome.webview'          : ()=>window.chrome && window.chrome.webview,   // WebView2 only; plain window.chrome (loadTimes/csi/app) is standard Chrome
     'chrome.webview.hostObjects': ()=>window.chrome && window.chrome.webview && window.chrome.webview.hostObjects,
     'webkit.messageHandlers'  : ()=>window.webkit && window.webkit.messageHandlers,
     'TelegramWebviewProxy'    : ()=>window.TelegramWebviewProxy,
@@ -116,9 +116,17 @@ function enumerate(){
     let o=null; try{o=get();}catch(e){}
     if(o){
       const p = props(o).filter(k=>!['constructor'].includes(k));
-      // host objects / ipc give the widest native reach
-      const dangerous = /hostObjects|ipcRenderer|external|electron/i.test(name);
-      item(name, dangerous?'crit':'some', `${p.length} member(s): ${p.slice(0,18).join(', ')}`);
+      // Standard browser surfaces that are NOT host bridges — do not cry wolf on these.
+      const vanillaExternal = name==='window.external' &&
+        p.every(k=>/AddSearchProvider|IsSearchProviderInstalled|constructor/.test(k));
+      const vanillaChrome  = name==='chrome.webview' ? false : false;
+      if (vanillaExternal){
+        item(name,'none',`${p.length} member(s): ${p.join(', ')} — standard Chrome API, not a host bridge`);
+      } else {
+        // hostObjects / ipcRenderer / electron give the widest native reach
+        const dangerous = /hostObjects|ipcRenderer|electronAPI|window\.electron$/i.test(name);
+        item(name, dangerous?'crit':'some', `${p.length} member(s): ${p.slice(0,18).join(', ')}`);
+      }
     }
   }
   if(!Object.values(known).some(g=>{try{return !!g()}catch(e){return false}}))
