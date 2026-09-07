@@ -119,9 +119,16 @@ function runAll(){
 
   t('P9 · sibling frame enumeration', ()=>{
     const n = parent.frames.length;                       // length is allowed cross-origin
-    let reach=0;
-    for(let i=0;i<n;i++){ try{ if(parent.frames[i].localStorage) reach++; }catch(e){} }
-    return {reached: reach>0, detail:`${n} sibling frame(s), storage reachable in ${reach}`};
+    let reach=0, self_=0;
+    for(let i=0;i<n;i++){
+      let f=null; try{ f=parent.frames[i]; }catch(e){ continue; }
+      if (f === window) { self_++; continue; }             // OUR OWN frame — not a sibling
+      try{ if(f.localStorage) reach++; }catch(e){}
+    }
+    const siblings = n - self_;
+    return {reached: reach>0,
+      detail:`${n} frame(s) under parent, ${self_} is us, ${siblings} true sibling(s); `+
+             `storage reachable in ${reach} sibling(s)`};
   });
 
   t('P10 · crossOriginIsolated / COOP-COEP state', ()=>{
