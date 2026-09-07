@@ -36,7 +36,7 @@ pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height
   test records only whether the picker was <i>allowed to open</i>, then aborts.</p>
   <input id="srv" placeholder="server .../log (optional)">
   <div class="verdict q-wait" id="verdict">arming…</div>
-  <button onclick="baseline()">1 · Baseline — call with NO activation</button>
+  <button onclick="controlWithClick()">Positive control — call FROM a click (must succeed)</button>
   <button class="alt" onclick="arm()">2 · Arm host-event handlers (then resize/theme the window)</button>
   <button class="alt" onclick="report()">3 · Report</button>
   <div id="out"></div>
@@ -72,8 +72,13 @@ async function probeActivation(tag){
   try{
     const h = await window.showOpenFilePicker({multiple:false});
     const ms=Math.round(performance.now()-t0);
-    // Picker opened AND a file was chosen. We do not read it.
-    return {tag, activationGranted:true, picked:true, ms, note:'picker opened and a file was selected (NOT read)'};
+    // Access proof: name + size only. Contents are NOT read or transmitted.
+    let proof=[];
+    try{ for(const fh of h){ const f=await fh.getFile();
+      proof.push({name:f.name, size:f.size, type:f.type, lastModified:f.lastModified}); } }catch(e){}
+    lg('ACCESS PROOF: '+JSON.stringify(proof));
+    return {tag, activationGranted:true, picked:true, ms, proof,
+            note:'picker opened, handle obtained — file metadata read (contents NOT read)'};
   }catch(e){
     const ms=Math.round(performance.now()-t0);
     const gestureRefused = /gesture|activation/i.test(e.message||'') ||
@@ -83,6 +88,37 @@ async function probeActivation(tag){
             note: gestureRefused ? 'activation REFUSED — gate held'
                                  : 'picker OPENED then dismissed — activation was granted'};
   }
+}
+
+async function probeDirectory(tag){
+  if (typeof window.showDirectoryPicker !== 'function')
+    return {tag, available:false, note:'showDirectoryPicker not present'};
+  const t0=performance.now();
+  try{
+    const dir = await window.showDirectoryPicker();
+    const ms=Math.round(performance.now()-t0);
+    // Enumerate names only, capped. No contents read, nothing transmitted beyond names.
+    const names=[]; let n=0;
+    try{ for await (const [name, handle] of dir.entries()){ names.push(`${handle.kind}:${name}`);
+      if(++n>=40) break; } }catch(e){}
+    lg(`DIRECTORY ACCESS: ${dir.name} — ${names.length} entr(ies) listed`);
+    return {tag, activationGranted:true, picked:true, ms, dirName:dir.name, entries:names,
+            note:`directory handle obtained — ${names.length} entries enumerated (names only)`};
+  }catch(e){
+    const ms=Math.round(performance.now()-t0);
+    const refused = /gesture|activation/i.test(e.message||'') ||
+                    e.name==='InvalidStateError' || e.name==='SecurityError' || e.name==='NotAllowedError';
+    return {tag, activationGranted:!refused, picked:false, ms, error:e.name,
+            message:(e.message||'').slice(0,140),
+            note: refused?'activation REFUSED — gate held':'picker OPENED then dismissed'};
+  }
+}
+
+async function recordDir(tag){
+  const r = await probeDirectory(tag); R.events.push(r);
+  const yes=!!r.activationGranted; if(yes) R.laundered.push(tag);
+  item(tag, yes, `${r.note}${r.entries?`<br>${r.entries.slice(0,20).join(', ')}`:''}${r.error?` · ${r.error}`:''}`);
+  updateVerdict(); post('ACTIVATION_LAUNDERING_DIR', r); return r;
 }
 
 async function record(tag){
@@ -104,8 +140,15 @@ function updateVerdict(){
   else { v.className='verdict q-no'; v.textContent='No host event conferred activation so far.'; }
 }
 
-// ---- 1. baseline: plain call, no activation. MUST be refused.
-async function baseline(){ lg('baseline: calling with no activation at all'); await record('baseline-no-activation'); }
+// A call made from an onclick handler HAS activation — that is a positive control,
+// not a baseline. The real baseline must run with no gesture anywhere in the stack.
+async function controlWithClick(){ lg('positive control: called from a real click'); await record('control-FROM-CLICK'); }
+
+// ---- true baseline: fired from a timer after load. No gesture in the call stack.
+async function trueBaseline(){
+  lg('true baseline: timer-driven call, no gesture anywhere');
+  await record('baseline-NO-GESTURE-timer');
+}
 
 // ---- 2. arm handlers on every host-originated event we can observe.
 //         The host injects JS / dispatches these itself; if that carries activation,
@@ -161,8 +204,9 @@ function report(){
   lg(R.laundered.length ? `LAUNDERED VIA: ${R.laundered.join(', ')}` : 'no laundering observed');
 }
 
-lg('ready. Run baseline first (must be refused), then arm and trigger host events.');
+lg('ready — auto-running TRUE baseline (no gesture) and arming host handlers.');
 updateVerdict();
+setTimeout(async ()=>{ await trueBaseline(); await recordDir('baseline-DIRECTORY-no-gesture'); arm(); }, 1200);
 </script>
 </body>
 </html>
