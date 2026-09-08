@@ -47,7 +47,10 @@ code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
 const T0 = performance.now();
 const Q = new URLSearchParams(location.search);
 const safeLS = k=>{try{return localStorage.getItem(k)}catch(e){return null}};
-let SRV = Q.get('srv') || safeLS('oracle_srv') || '';
+// Baked in so the Mini App URL stays short and nothing depends on a query param
+// surviving the container's launch flow. ?srv= still overrides for one-off runs.
+const DEFAULT_SRV = 'https://a48f-117-212-29-194.ngrok-free.app/log';
+let SRV = Q.get('srv') || safeLS('oracle_srv') || DEFAULT_SRV;
 document.getElementById('srv').value = SRV;
 document.getElementById('srv').onchange = e=>{SRV=e.target.value.replace(/\/$/,'');try{localStorage.setItem('oracle_srv',SRV)}catch(_){}};
 
@@ -200,6 +203,7 @@ function mapWindow(){
 }
 
 // ---------- run immediately: no user event has occurred in this page
+lg(`server: ${SRV}`);
 lg(`load. userActivation @t0 = ${JSON.stringify(INHERITED)}  pageEvents=${pageEvents}`);
 render();
 const FIRST = (Q.get('first')||'dir').toLowerCase();
