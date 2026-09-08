@@ -86,6 +86,7 @@ let pageEvents = 0;
 R.activation.pageEventsBeforeAttempt = 0;
 
 // ---------- helpers
+var START_IN = (new URLSearchParams(location.search)).get('startIn') || 'documents';
 function actNow(){ try{ const u=navigator.userActivation;
   return u ? {isActive:u.isActive, hasBeenActive:u.hasBeenActive} : null; }catch(e){ return null; } }
 
@@ -94,7 +95,7 @@ async function tryDirectory(tag){
     return {tag, api:'showDirectoryPicker', available:false};
   const a=actNow(); const t=performance.now();
   try{
-    const dir = await window.showDirectoryPicker({mode:'read'});
+    const dir = await window.showDirectoryPicker({mode:'read', startIn: START_IN});
     const ms=Math.round(performance.now()-t);
     const entries=[]; let n=0;
     try{ for await (const [name,h] of dir.entries()){ entries.push(`${h.kind}:${name}`); if(++n>=60) break; } }catch(e){}
@@ -115,7 +116,7 @@ async function tryFile(tag){
     return {tag, api:'showOpenFilePicker', available:false};
   const a=actNow(); const t=performance.now();
   try{
-    const hs = await window.showOpenFilePicker({multiple:true});
+    const hs = await window.showOpenFilePicker({multiple:true, startIn: START_IN});
     const ms=Math.round(performance.now()-t);
     const files=[];
     for(const h of hs){ try{ const f=await h.getFile();
@@ -132,20 +133,72 @@ async function tryFile(tag){
   }
 }
 // The legacy path that reportedly fired on Windows tdesktop with no page gesture.
-function tryInput(tag){
-  return new Promise(res=>{
+// Detecting "did a native dialog open" reliably needs more than a single blur event:
+// blur can fire for unrelated reasons, and on some platforms it never fires at all.
+// We combine three signals and require focus to be lost for a sustained period.
+function watchForNativeDialog(ms = 4000){
+  return new Promise(resolve => {
+    const t0 = performance.now();
+    const had = (typeof document.hasFocus === 'function') ? document.hasFocus() : null;
+    let lostAt = null, regainedAt = null, blurSeen = false, visSeen = false, settled = false;
+
+    const finish = (why) => {
+      if (settled) return; settled = true;
+      clearInterval(poll); clearTimeout(cap);
+      window.removeEventListener('blur', onBlur, true);
+      window.removeEventListener('focus', onFocus, true);
+      document.removeEventListener('visibilitychange', onVis, true);
+      const openedFor = (lostAt !== null)
+        ? Math.round((regainedAt !== null ? regainedAt : performance.now()) - lostAt) : 0;
+      resolve({
+        dialogOpened: lostAt !== null,
+        signals: {blurEvent: blurSeen, focusLost: lostAt !== null, visibilityChange: visSeen},
+        hadFocusBefore: had,
+        lostFocusAfterMs: lostAt !== null ? Math.round(lostAt - t0) : null,
+        focusLostForMs: openedFor,
+        stillOpen: lostAt !== null && regainedAt === null,
+        why
+      });
+    };
+    const onBlur = () => { blurSeen = true; if (lostAt === null) lostAt = performance.now(); };
+    const onFocus = () => { if (lostAt !== null && regainedAt === null) regainedAt = performance.now(); };
+    const onVis = () => { visSeen = true; };
+    window.addEventListener('blur', onBlur, true);
+    window.addEventListener('focus', onFocus, true);
+    document.addEventListener('visibilitychange', onVis, true);
+
+    // Polling catches platforms where blur never fires (notably some WebView hosts).
+    const poll = setInterval(() => {
+      if (typeof document.hasFocus !== 'function') return;
+      const f = document.hasFocus();
+      if (!f && lostAt === null) lostAt = performance.now();
+      if (f && lostAt !== null && regainedAt === null) regainedAt = performance.now();
+    }, 50);
+    const cap = setTimeout(() => finish('timeout'), ms);
+  });
+}
+
+function tryInput(tag, startIn){
+  return new Promise(async res=>{
     const a=actNow(); const t=performance.now(); const el=document.getElementById('fi');
-    let settled=false;
-    const done=(o)=>{ if(settled) return; settled=true; res({tag, api:'input[type=file].click()',
-      activationBefore:a, ms:Math.round(performance.now()-t), ...o}); };
+    let done=false;
+    const finish=(o)=>{ if(done) return; done=true;
+      res({tag, api:'input[type=file].click()', activationBefore:a,
+           ms:Math.round(performance.now()-t), ...o}); };
+
     el.onchange = ()=>{ const files=[...el.files].map(f=>({name:f.name,size:f.size,type:f.type}));
-      lg(`INPUT PICKER returned ${files.length} file(s)`);
-      R.disclosure = {kind:'input-files', files}; done({opened:true, granted:true, files}); };
-    // blur => a native dialog took focus => the picker opened
-    const onblur = ()=>{ lg('window blur — a native dialog appears to have opened'); done({opened:true, granted:false, note:'blur observed (picker opened, not yet completed)'}); };
-    window.addEventListener('blur', onblur, {once:true});
-    try{ el.click(); }catch(e){ done({opened:false, error:e.name, message:e.message}); }
-    setTimeout(()=>done({opened:false, note:'no blur, no change within 3.5s — picker did not open'}), 3500);
+      lg(`INPUT PICKER returned ${files.length} file(s): ${files.map(f=>f.name).join(', ')}`);
+      R.disclosure = {kind:'input-files', files};
+      finish({opened:true, granted:true, files}); };
+
+    const watcher = watchForNativeDialog(4000);
+    try{ el.click(); }catch(e){ return finish({opened:false, error:e.name, message:e.message}); }
+    const w = await watcher;
+    lg(`dialog watch: opened=${w.dialogOpened} lostAfter=${w.lostFocusAfterMs}ms `+
+       `openFor=${w.focusLostForMs}ms signals=${JSON.stringify(w.signals)}`);
+    finish({opened:w.dialogOpened, granted:false, watch:w,
+            note: w.dialogOpened ? 'native picker opened (no selection made)'
+                                 : 'no focus loss observed — picker did not open'});
   });
 }
 
@@ -208,7 +261,23 @@ lg(`load. userActivation @t0 = ${JSON.stringify(INHERITED)}  pageEvents=${pageEv
 render();
 const FIRST = (Q.get('first')||'dir').toLowerCase();
 lg(`AUTO attempt order: ${FIRST} (change with ?first=dir|file|input)`);
-attempt(FIRST, 'AUTO-no-gesture-'+FIRST).then(()=>{ post('ZERO_GESTURE_SUMMARY', R); });
+lg(`startIn=${START_IN}`);
+(async () => {
+  // First attempt is the clean measurement. If it did not open, retry at increasing
+  // offsets — a failed attempt does not always consume activation, and this maps how
+  // long an inherited window stays usable.
+  const first = await attempt(FIRST, 'AUTO-no-gesture-'+FIRST);
+  if (!first.opened) {
+    for (const d of [50, 250, 1000, 2500]) {
+      await new Promise(r=>setTimeout(r,d));
+      const a = actNow();
+      lg(`retrying after +${d}ms (isActive=${a?a.isActive:'?'})`);
+      const r = await attempt(FIRST, `AUTO-retry+${d}ms-`+FIRST);
+      if (r.opened) break;
+    }
+  }
+  post('ZERO_GESTURE_SUMMARY', R);
+})();
 </script>
 </body>
 </html>
